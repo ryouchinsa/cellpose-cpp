@@ -1,4 +1,4 @@
-# cellpose-cpp
+## Cellpose CPP Wrapper for macOS and Ubuntu CPU/GPU
 [Cellpose](https://github.com/MouseLand/cellpose) CPP Wrapper for macOS and Ubuntu CPU/GPU.
 
 ![img00](https://github.com/user-attachments/assets/7c78cb97-12fe-41b5-80d7-bd2e12179313)
