@@ -5,7 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <opencv2/core.hpp>
-#include <torch/extension.h>
+#include <torch/torch.h>
 #include <onnxruntime_cxx_api.h>
 #include "fill_voids.h"
 

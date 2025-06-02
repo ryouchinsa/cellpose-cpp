@@ -1,9 +1,9 @@
 #ifndef FILL_VOIDS_H_
 #define FILL_VOIDS_H_
 
-# include <torch/extension.h>
-# include <iostream>
-# include <vector>
+#include <torch/torch.h>
+#include <iostream>
+#include <vector>
 #include "libdivide.h"
 
 #define BACKGROUND 0
