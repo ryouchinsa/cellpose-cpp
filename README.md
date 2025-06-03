@@ -34,6 +34,8 @@ Download ONNX Runtime.
 - [onnxruntime-linux-x64-1.20.0.tgz](https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-1.20.0.tgz) for Ubuntu CPU
 - [onnxruntime-linux-x64-gpu-1.20.0.tgz](https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-gpu-1.20.0.tgz) for Ubuntu GPU
 
+![cellpose_cpp](https://github.com/user-attachments/assets/3a93316d-d205-45c5-8ebe-eb2e0cbf09ef)
+
 For Ubuntu, install packages including gflags and opencv.
 ```bash
 sudo apt-get update
