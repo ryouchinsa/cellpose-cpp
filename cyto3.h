@@ -31,8 +31,8 @@ class Cyto3 {
   void loadingStart();
   void loadingEnd();
   cv::Size getInputSize();
-  void changeFlowThreshold(float flow_threshold, int min_size, cv::Mat *outputMask);
-  bool preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size, cv::Mat *outputMask);
+  void changeFlowThreshold(float flow_threshold, int min_size, std::string device, cv::Mat *outputMask);
+  bool preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size, std::string device, cv::Mat *outputMask);
   void preprocessingStart();
   void preprocessingEnd();
 };

@@ -178,11 +178,18 @@ void fillHolesAndRemoveSmallMasks(torch::Tensor mask, int min_size){
   }
 }
 
-void postProcess(torch::Tensor mask, torch::Tensor flowErrors, float flow_threshold, int min_size, cv::Mat *outputMask){
+torch::DeviceType getDeviceType(std::string device){
+  if(device == "cpu"){
+    return torch::kCPU;
+  }
+  return torch::kCUDA;
+}
+
+void postProcess(torch::Tensor mask, torch::Tensor flowErrors, float flow_threshold, int min_size, std::string device, cv::Mat *outputMask){
   torch::set_num_threads(1);
   mask = removeBadFlowMasks(mask, flowErrors, flow_threshold);
-  // mask = mask.to(torch::kCPU);
-  // mask = mask.to(torch::kCUDA);
+  torch::DeviceType device_type = getDeviceType(device);
+  mask = mask.to(device_type);
   fillHolesAndRemoveSmallMasks(mask, min_size);
   for (int i = 0; i < (*outputMask).rows; i++) {
     for (int j = 0; j < (*outputMask).cols; j++) {
@@ -191,17 +198,16 @@ void postProcess(torch::Tensor mask, torch::Tensor flowErrors, float flow_thresh
   }
 }
 
-void Cyto3::changeFlowThreshold(float flow_threshold, int min_size, cv::Mat *outputMask){
-  torch::DeviceType device_type = torch::kCPU;
-  // torch::DeviceType device_type = torch::kCUDA;
+void Cyto3::changeFlowThreshold(float flow_threshold, int min_size, std::string device, cv::Mat *outputMask){
+  torch::DeviceType device_type = getDeviceType(device);
   auto optionsMask = torch::TensorOptions().dtype(torch::kInt64).device(device_type);
   auto optionsFlowErrors = torch::TensorOptions().dtype(torch::kFloat64).device(device_type);
   torch::Tensor mask = torch::from_blob(maskVector.data(), {inputShapeEncoder[2], inputShapeEncoder[3]}, optionsMask);
   torch::Tensor flowErrors = torch::from_blob(flowErrorsVector.data(), {(int64_t)flowErrorsVector.size()}, optionsFlowErrors);
-  postProcess(mask, flowErrors, flow_threshold, min_size, outputMask);
+  postProcess(mask, flowErrors, flow_threshold, min_size, device, outputMask);
 }
 
-bool Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size, cv::Mat *outputMask){
+bool Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size, std::string device, cv::Mat *outputMask){
   try{
     preprocessingStart();
     if(image.size() != cv::Size((int)inputShapeEncoder[3], (int)inputShapeEncoder[2])){
@@ -251,9 +257,7 @@ bool Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, con
     std::vector<const char*> outputNames = getOutputNames(sessionEncoder);
     auto outputTensors =  sessionEncoder->Run(runOptionsEncoder, inputNames.data(), inputTensors.data(), inputTensors.size(), outputNames.data(), outputNames.size());
     
-    torch::DeviceType device_type = torch::kCPU;
-  // torch::DeviceType device_type = torch::kCUDA;
-
+    torch::DeviceType device_type = getDeviceType(device);
     auto maskValues = outputTensors[0].GetTensorMutableData<int64_t>();
     auto maskShape = outputTensors[0].GetTensorTypeAndShapeInfo().GetShape();
     auto optionsMask = torch::TensorOptions().dtype(torch::kInt64).device(device_type);
@@ -266,7 +270,7 @@ bool Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, con
     torch::Tensor flowErrors = torch::from_blob(flowErrorsValues, {flowErrorsShape[0]}, optionsFlowErrors);
     flowErrorsVector.assign(flowErrors.data_ptr<double>(), flowErrors.data_ptr<double>() + flowErrors.numel());
 
-    postProcess(mask, flowErrors, flow_threshold, min_size, outputMask);
+    postProcess(mask, flowErrors, flow_threshold, min_size, device, outputMask);
     
     for (size_t i = 0; i < inputNames.size(); ++i) {
       delete [] inputNames[i];
