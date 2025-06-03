@@ -56,14 +56,14 @@ Build and run.
 # macOS
 cmake -S . -B build -DONNXRUNTIME_ROOT_DIR=/Users/ryo/Downloads/onnxruntime-osx-universal2-1.20.0
 # Ubuntu CPU
-cmake -S . -B build -DONNXRUNTIME_ROOT_DIR=~/onnxruntime-linux-x64-1.20.0 -DCMAKE_PREFIX_PATH=~/libtorch
+cmake -S . -B build -DONNXRUNTIME_ROOT_DIR=/root/onnxruntime-linux-x64-1.20.0 -DCMAKE_PREFIX_PATH=/root/libtorch
 # Ubuntu GPU
-cmake -S . -B build -DONNXRUNTIME_ROOT_DIR=~/onnxruntime-linux-x64-gpu-1.20.0 -DCMAKE_PREFIX_PATH=~/libtorch
+cmake -S . -B build -DONNXRUNTIME_ROOT_DIR=/root/onnxruntime-linux-x64-gpu-1.20.0 -DCMAKE_PREFIX_PATH=/root/libtorch
 
 cmake --build build
 
 # macOS
-./build/cyto3_cpp_test -encoder="../cyto3.onnx" -image="../demo_images/img02.png" -device="cpu"
+./build/cyto3_cpp_test -encoder="cyto3.onnx" -image="demo_images/img02.png" -device="cpu"
 # Ubuntu CPU
 ./build/cyto3_cpp_test -encoder="cyto3.onnx" -image="demo_images/img02.png" -device="cpu"
 # Ubuntu GPU
