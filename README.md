@@ -62,9 +62,7 @@ cmake -S . -B build -DONNXRUNTIME_ROOT_DIR=/root/onnxruntime-linux-x64-gpu-1.20.
 
 cmake --build build
 
-# macOS
-./build/cyto3_cpp_test -encoder="cyto3.onnx" -image="demo_images/img02.png" -device="cpu"
-# Ubuntu CPU
+# macOS and Ubuntu CPU
 ./build/cyto3_cpp_test -encoder="cyto3.onnx" -image="demo_images/img02.png" -device="cpu"
 # Ubuntu GPU
 ./build/cyto3_cpp_test -encoder="cyto3.onnx" -image="demo_images/img02.png" -device="cuda:0"
