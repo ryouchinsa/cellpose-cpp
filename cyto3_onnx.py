@@ -659,7 +659,7 @@ def show_mask(img_original, img_size, mask, flow_errors, device):
         )
         mask = mask.long()
         mask = mask.squeeze()
-    mask = np.array(mask)
+    mask = np.array(mask.cpu())
     mask255 = np.copy(mask)
     mask255[mask255 > 0] = 255
     mask255 = mask255.astype(np.uint8)
@@ -734,6 +734,7 @@ if __name__ == "__main__":
     parser.add_argument("--image",type=str,default="demo_images/img00.png",required=False,help="image path")
     parser.add_argument("--device",type=str,default="cpu",required=False,help="cpu or cuda:0")
     args = parser.parse_args()
+    print(args.device)
     device = torch.device(args.device)
     torch.set_default_device(args.device)
     if args.mode == "show":
