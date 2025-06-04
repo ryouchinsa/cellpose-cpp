@@ -215,8 +215,10 @@ class Cyto3ONNX(nn.Module):
         pt += rpad
         pt = torch.clamp(pt, min=0)
         for i in range(pt.shape[0]):
-            print(pt[i].device)
-            pt[i] = torch.clamp(pt[i], max=shape0[i]+rpad-1)
+            max_xize = shape0[i]+rpad-1
+            if type(max_xize) is not int:
+                max_xize = max_xize.to(self.device.type)
+            pt[i] = torch.clamp(pt[i], max=max_xize)
         t = torch.empty(shape0[0] + 2*rpad, shape0[1] + 2*rpad)
         shape = t.size()
         print(shape)
