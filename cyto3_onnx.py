@@ -609,11 +609,11 @@ def import_onnx(image_path, device):
     img_resized, img_size, channels, diameter, niter = get_cyte3_inputs(img, device=device)
     start = time.perf_counter()
     inputs = [
-        img_resized.numpy(), 
-        img_size.numpy(), 
-        channels.numpy(),
-        diameter.numpy(), 
-        niter.numpy(), 
+        img_resized.cpu().numpy(), 
+        img_size.cpu().numpy(), 
+        channels.cpu().numpy(),
+        diameter.cpu().numpy(), 
+        niter.cpu().numpy(), 
     ]
     mask, flow_errors = session.run(
         output_names, 
