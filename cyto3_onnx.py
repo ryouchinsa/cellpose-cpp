@@ -32,7 +32,10 @@ class Cyto3ONNX(nn.Module):
         img = set_img_channels(img, channels)
         img = img.squeeze()
         img = torch.permute(img, (2, 0, 1))
-        img = set_img_normalized(img)
+        percentiles = torch.zeros((2), dtype=torch.int, device=self.device)
+        percentiles[0] = 1
+        percentiles[1] = 99
+        img = set_img_normalized(img, percentiles)
         img = torch.permute(img, (1, 2, 0))
         img = img[np.newaxis, ...]
         print(img.shape)
@@ -345,11 +348,11 @@ def set_img_channels(img, channels):
     print(img.shape)
     return img
 
-def normalize99(img):
+def normalize99(img, percentiles):
     input = torch.flatten(img)
-    percentiles = torch.zeros((2), dtype=torch.int)
-    percentiles[0] = 1
-    percentiles[1] = 99
+    # percentiles = torch.zeros((2), dtype=torch.int)
+    # percentiles[0] = 1
+    # percentiles[1] = 99
     in_sorted, in_argsort = torch.sort(input, dim=0)
     positions = percentiles * (input.shape[0]-1) / 100
     floored = torch.floor(positions)
@@ -368,10 +371,10 @@ def normalize99(img):
     return img
 
 @torch.jit.script
-def set_img_normalized(img):
+def set_img_normalized(img, percentiles):
     nchan = img.shape[0]
     for c in range(nchan):
-        img[c] = normalize99(img[c])
+        img[c] = normalize99(img[c], percentiles)
     return img
 
 @torch.jit.script
@@ -541,7 +544,9 @@ def show(image_path, device):
     img = cv2.imread(image_path)
     img_original = img
     img_resized, img_size, channels, diameter, niter = get_cyte3_inputs(img, device=device)
+    start = time.perf_counter()
     mask, flow_errors = model.forward(img_resized, img_size, channels, diameter, niter)
+    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, flow_errors, device)
 
 def export_cyte3_onnx(image_path, device):
