@@ -350,9 +350,6 @@ def set_img_channels(img, channels):
 
 def normalize99(img, percentiles):
     input = torch.flatten(img)
-    # percentiles = torch.zeros((2), dtype=torch.int)
-    # percentiles[0] = 1
-    # percentiles[1] = 99
     in_sorted, in_argsort = torch.sort(input, dim=0)
     positions = percentiles * (input.shape[0]-1) / 100
     floored = torch.floor(positions)
