@@ -29,6 +29,7 @@ class Cyto3ONNX(nn.Module):
 
     def forward(self, img, img_size, channels, diameter, niter):
         print("--- Cyto3ONNX forward", img.shape, img_size, channels, diameter, niter)
+
         img = set_img_channels(img, channels)
         img = img.squeeze()
         img = torch.permute(img, (2, 0, 1))
@@ -39,6 +40,8 @@ class Cyto3ONNX(nn.Module):
         img = torch.permute(img, (1, 2, 0))
         img = img[np.newaxis, ...]
         print(img.shape)
+
+        # return img, img
 
         print("--- _run_net begin")
         bsize = 224
@@ -60,6 +63,8 @@ class Cyto3ONNX(nn.Module):
         print(styles.shape)
         print("--- _run_net end")
 
+        # return yf, dP
+
         print("--- follow_flows begin")
         dP = dP[:, 0]
         cellprob = cellprob[0]
@@ -76,12 +81,16 @@ class Cyto3ONNX(nn.Module):
         print(p_final)
         print("--- follow_flows end")
 
+        # return p_final, p_final
+
         print("--- get_masks_torch begin")
         max_size_fraction = 0.4
         mask = self.get_masks_torch(p_final, inds, dP.shape[1:], img_size, max_size_fraction)
         mask = torch.reshape(mask, (img_size[0], img_size[1]))
         del p_final
         print("--- get_masks_torch end")
+
+        # return mask, mask
         
         print("--- remove_bad_flow_masks begin")
         mask, flow_errors = self.remove_bad_flow_masks(mask, dP)
@@ -133,35 +142,35 @@ class Cyto3ONNX(nn.Module):
         print(imgb.shape)
 
         tile_overlap = min(0.5, max(0.05, tile_overlap))
-        ystart = torch.linspace(0, img_size_pad[0] - lyx[0], nyx[0], dtype=torch.int)
-        xstart = torch.linspace(0, img_size_pad[1] - lyx[1], nyx[1], dtype=torch.int)
+        ystart = torch.linspace(0, img_size_pad[0] - lyx[0], nyx[0], dtype=torch.int, device=self.device)
+        xstart = torch.linspace(0, img_size_pad[1] - lyx[1], nyx[1], dtype=torch.int, device=self.device)
         ystart = ystart.long()
         xstart = xstart.long()
         print(ystart)
         print(xstart)
 
-        IMG = torch.zeros((ystart.shape[0], xstart.shape[0], nchan, lyx[0], lyx[1]), dtype=torch.float32)
+        IMG = torch.zeros((ystart.shape[0], xstart.shape[0], nchan, lyx[0], lyx[1]), dtype=torch.float32, device=self.device)
         print(IMG.shape)
-        ysub = torch.zeros((ystart.shape[0] * xstart.shape[0], 2), dtype=torch.long)
-        xsub = torch.zeros((ystart.shape[0] * xstart.shape[0], 2), dtype=torch.long)
+        ysub = torch.zeros((ystart.shape[0] * xstart.shape[0], 2), dtype=torch.long, device=self.device)
+        xsub = torch.zeros((ystart.shape[0] * xstart.shape[0], 2), dtype=torch.long, device=self.device)
         IMG= set_imgb_to_IMG(imgb, ystart, xstart, lyx, ysub, xsub, IMG)
         print(ysub)
         print(xsub)
 
         IMGa = torch.reshape(IMG, (nyx[0] * nyx[1], nchan, lyx[0], lyx[1]))
         print(IMGa.shape)
-        ya = torch.zeros((nyx[0] * nyx[1], nout, lyx[0], lyx[1]), dtype=torch.float32)
-        stylea = torch.zeros((nyx[0] * nyx[1], 256), dtype=torch.float32)        
+        ya = torch.zeros((nyx[0] * nyx[1], nout, lyx[0], lyx[1]), dtype=torch.float32, device=self.device)
+        stylea = torch.zeros((nyx[0] * nyx[1], 256), dtype=torch.float32, device=self.device)        
         print(ya.shape)
         print(stylea.shape)
         ya, stylea = net_forward(net, IMGa)
 
-        Navg = torch.zeros((img_size_pad[1], img_size_pad[0]), dtype=torch.float32)
-        yfi = torch.zeros((ya.shape[1], img_size_pad[1], img_size_pad[0]), dtype=torch.float32)
+        Navg = torch.zeros((img_size_pad[1], img_size_pad[0]), dtype=torch.float32, device=self.device)
+        yfi = torch.zeros((ya.shape[1], img_size_pad[1], img_size_pad[0]), dtype=torch.float32, device=self.device)
         print(yfi.shape)
 
         sig = 7.5
-        xm = torch.arange(bsize, dtype=torch.float32)
+        xm = torch.arange(bsize, dtype=torch.float32, device=self.device)
         xm = torch.abs(xm - torch.mean(xm))
         mask = 1 / (1 + torch.exp((xm - (bsize / 2 - 20)) / sig))
         mask = mask * mask[:, None]
@@ -169,8 +178,8 @@ class Cyto3ONNX(nn.Module):
                     bsize // 2 - ya.shape[-1] // 2:bsize // 2 + ya.shape[-1] // 2 + ya.shape[-1] % 2]
         yfi, Navg = set_yfi_Navg(ya, mask, ysub, xsub, yfi, Navg)
 
-        yf = torch.zeros((Lz, nout, img_size_pad[1], img_size_pad[0]), dtype=torch.float32)
-        styles = torch.zeros((Lz, 256), dtype=torch.float32)
+        yf = torch.zeros((Lz, nout, img_size_pad[1], img_size_pad[0]), dtype=torch.float32, device=self.device)
+        styles = torch.zeros((Lz, 256), dtype=torch.float32, device=self.device)
         print(yf.shape)
         print(styles.shape)
         yfi /= Navg
@@ -183,9 +192,9 @@ class Cyto3ONNX(nn.Module):
 
     def follow_flows(self, dP, inds, img_size, niter):
         ndim = img_size.shape[0]
-        pt = torch.zeros((*[1]*ndim, inds.shape[1], ndim), dtype=torch.float32)
+        pt = torch.zeros((*[1]*ndim, inds.shape[1], ndim), dtype=torch.float32, device=self.device)
         print(pt.shape)
-        im = torch.zeros((1, ndim, img_size[0], img_size[1]), dtype=torch.float32)
+        im = torch.zeros((1, ndim, img_size[0], img_size[1]), dtype=torch.float32, device=self.device)
         print(im.shape)
         for n in range(ndim):
             pt[0, 0, :, ndim - n - 1] = inds[n]
@@ -215,11 +224,11 @@ class Cyto3ONNX(nn.Module):
         pt += rpad
         pt = torch.clamp(pt, min=0)
         for i in range(pt.shape[0]):
-            max_xize = shape0[i]+rpad-1
-            if type(max_xize) is not int:
-                max_xize = max_xize.to(self.device.type)
-            pt[i] = torch.clamp(pt[i], max=max_xize)
-        t = torch.empty(shape0[0] + 2*rpad, shape0[1] + 2*rpad)
+            max_size = shape0[i]+rpad-1
+            if type(max_size) is not int:
+                max_size = max_size.to(self.device)
+            pt[i] = torch.clamp(pt[i], max=max_size)
+        t = torch.empty(shape0[0] + 2*rpad, shape0[1] + 2*rpad, device=self.device)
         shape = t.size()
         print(shape)
         img_size_pad = img_size + 2*rpad
@@ -227,7 +236,7 @@ class Cyto3ONNX(nn.Module):
         print(img_size_pad)
 
         output, counts = torch.unique(pt.t(), return_counts=True, dim=0)
-        h1 = torch.zeros(shape, dtype=torch.long)
+        h1 = torch.zeros(shape, dtype=torch.long, device=self.device)
         pt0 = output.t()[0]
         pt1 = output.t()[1]
         pt_tuple = (pt0, pt1)
@@ -247,11 +256,11 @@ class Cyto3ONNX(nn.Module):
         seeds1 = torch.stack((seeds1_0, seeds1_1), dim=1)
 
         n_seeds = seeds1.shape[0]
-        h_slc = torch.zeros((n_seeds, *[11]*ndim))
+        h_slc = torch.zeros((n_seeds, *[11]*ndim), device=self.device)
         h_slc = set_h_slc(h1, seeds1, h_slc)
         del h1
 
-        seed_masks = torch.zeros((n_seeds, *[11]*ndim))
+        seed_masks = torch.zeros((n_seeds, *[11]*ndim), device=self.device)
         seed_masks[:,5,5] = 1
         seed_masks_size = img_size.clone()
         seed_masks_size[0] = seed_masks.shape[1]
@@ -262,7 +271,7 @@ class Cyto3ONNX(nn.Module):
             seed_masks *= h_slc > 2
         del h_slc
 
-        M1 = torch.zeros(shape, dtype=torch.long)
+        M1 = torch.zeros(shape, dtype=torch.long, device=self.device)
         M1 = set_M1(seeds1, seed_masks, M1)
         del seed_masks
         pt0 = pt[0]
@@ -270,7 +279,7 @@ class Cyto3ONNX(nn.Module):
         pt_tuple = (pt0, pt1)
         M1 = M1[pt_tuple]
 
-        M0 = torch.zeros(shape0, dtype=torch.long)
+        M0 = torch.zeros(shape0, dtype=torch.long, device=self.device)
         inds0 = inds[0]
         inds1 = inds[1]
         inds_tuple = (inds0, inds1)
@@ -290,10 +299,10 @@ class Cyto3ONNX(nn.Module):
         dP_masks = self.masks_to_flows(mask)
         print(dP_masks.shape)
         print(dP_masks[dP_masks > 0])
-        flow_errors = torch.zeros((torch.max(mask)), dtype=torch.float64)
+        flow_errors = torch.zeros((torch.max(mask)), dtype=torch.float64, device=self.device)
         for i in range(dP_masks.shape[0]):
             error = (dP_masks[i] - flows[i] / 5.)**2
-            m = torch.zeros((torch.max(mask)), dtype=torch.float64)
+            m = torch.zeros((torch.max(mask)), dtype=torch.float64, device=self.device)
             m = set_flow_errors(error, mask, m)
             flow_errors += m
         return mask, flow_errors
@@ -304,30 +313,43 @@ class Cyto3ONNX(nn.Module):
         masks_padded = torch.nn.functional.pad(masks, (1, 1, 1, 1))
         shape = masks_padded.shape
         yx = torch.nonzero(masks_padded).t()
-        neighbors = torch.zeros((2, 9, yx[0].shape[0]), dtype=torch.int64)
+        neighbors = torch.zeros((2, 9, yx[0].shape[0]), dtype=torch.int64, device=self.device)
         yxi = [[0, -1, 1, 0, 0, -1, -1, 1, 1], [0, 0, 0, -1, 1, -1, 1, -1, 1]]
         for i in range(9):
             neighbors[0, i] = yx[0] + yxi[0][i]
             neighbors[1, i] = yx[1] + yxi[1][i]
-        isneighbor = torch.ones((9, yx[0].shape[0]), dtype=torch.bool)
+        isneighbor = torch.ones((9, yx[0].shape[0]), dtype=torch.bool, device=self.device)
         m0 = masks_padded[neighbors[0, 0], neighbors[1, 0]]
         for i in range(1, 9):
             isneighbor[i] = masks_padded[neighbors[0, i], neighbors[1, i]] == m0
         del m0, masks_padded
 
         labels_num = torch.max(masks)
-        centers = torch.zeros((labels_num, 2), dtype=torch.int64)
-        ext = torch.zeros((labels_num), dtype=torch.int64)
+        centers = torch.zeros((labels_num, 2), dtype=torch.int64, device=self.device)
+        ext = torch.zeros((labels_num), dtype=torch.int64, device=self.device)
         centers, ext = set_find_objects(masks, centers, ext)
         meds_p = centers + 1
-        T = torch.zeros(shape, dtype=torch.float64)
+        T = torch.zeros(shape, dtype=torch.float64, device=self.device)
         mu = set_extend_centers(neighbors, isneighbor, meds_p, ext, T)
         del neighbors, isneighbor, meds_p
 
         mu /= (1e-60 + torch.sum(mu**2, dim=0)**0.5)
-        mu0 = torch.zeros((2, Ly0, Lx0), dtype=torch.float64)
+        mu0 = torch.zeros((2, Ly0, Lx0), dtype=torch.float64, device=self.device)
         mu0[:, yx[0] - 1, yx[1] - 1] = mu
         return mu0
+
+def set_img_channels_normalize99(img, channels, device):
+    img = set_img_channels(img, channels)
+    img = img.squeeze()
+    img = torch.permute(img, (2, 0, 1))
+    percentiles = torch.zeros((2), dtype=torch.int, device=device)
+    percentiles[0] = 1
+    percentiles[1] = 99
+    img = set_img_normalized(img, percentiles)
+    img = torch.permute(img, (1, 2, 0))
+    img = img[np.newaxis, ...]
+    print(img.shape)
+    return img
 
 @torch.jit.script
 def set_img_channels(img, channels):
@@ -580,11 +602,10 @@ def export_cyte3_onnx(image_path, device):
 
 def import_onnx(image_path, device):
     onnx_path = "cyto3.onnx"
+    providers=onnxruntime.get_available_providers()
+    print(providers)
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
-    else:
-        providers=onnxruntime.get_available_providers()
-        print(providers)
     session = onnxruntime.InferenceSession(
         onnx_path, 
         providers=providers
@@ -625,8 +646,8 @@ def import_onnx(image_path, device):
         }
     )
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
-    mask = torch.from_numpy(mask).to(device.type)
-    flow_errors = torch.from_numpy(flow_errors).to(device.type)
+    mask = torch.from_numpy(mask).to(device)
+    flow_errors = torch.from_numpy(flow_errors).to(device)
     show_mask(img_original, img_size, mask, flow_errors, device)
 
 def get_cyte3_inputs(img, niter_default=200, device=torch.device("cpu")):
@@ -635,7 +656,7 @@ def get_cyte3_inputs(img, niter_default=200, device=torch.device("cpu")):
     print(img.shape)
     img = img.transpose(2, 0, 1)
     img = img[np.newaxis, :, :, :].astype(np.float32)
-    img = torch.from_numpy(img).to(device.type)
+    img = torch.from_numpy(img).to(device)
     print(img.shape)
     img_size = torch.tensor([img.shape[2], img.shape[3]], dtype=torch.int64)
     print(img_size)
@@ -645,6 +666,9 @@ def get_cyte3_inputs(img, niter_default=200, device=torch.device("cpu")):
     print("diameter", diameter)
     niter = torch.tensor([niter_default], dtype=torch.int64)
     print("niter", niter)
+
+    # img = set_img_channels_normalize99(img, channels, device)
+
     return img, img_size, channels, diameter, niter
 
 def show_mask(img_original, img_size, mask, flow_errors, device):
@@ -686,7 +710,7 @@ def post_process(mask, flow_errors, flow_threshold, min_size, device):
     print("--- post_process begin")
     mask = remove_bad_flow_masks(mask, flow_errors, flow_threshold)
     labels_num = torch.max(mask)
-    slices = torch.zeros((labels_num, 4), dtype=torch.int64)
+    slices = torch.zeros((labels_num, 4), dtype=torch.int64, device=device)
     slices = find_objects(mask, slices)
     mask = fill_holes_and_remove_small_masks(mask, min_size, slices, device)
     print("--- post_process end")
@@ -714,7 +738,7 @@ def fill_holes_and_remove_small_masks(masks, min_size, slices, device):
             msk[int(msk.shape[0] * 0.425):int(msk.shape[0] * 0.575), int(msk.shape[1] * 0.425):int(msk.shape[1] * 0.575)] = 0
             msk = np.array(msk.cpu())
             msk = fill_voids.fill(msk)
-            msk = torch.from_numpy(msk).to(device.type)
+            msk = torch.from_numpy(msk).to(device)
             masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = (j + 1)
             j += 1
     return masks
@@ -739,9 +763,7 @@ if __name__ == "__main__":
     parser.add_argument("--image",type=str,default="demo_images/img00.png",required=False,help="image path")
     parser.add_argument("--device",type=str,default="cpu",required=False,help="cpu or cuda:0")
     args = parser.parse_args()
-    print(args.device)
     device = torch.device(args.device)
-    torch.set_default_device(args.device)
     if args.mode == "show":
         show(args.image, device)
     elif args.mode == "export":
