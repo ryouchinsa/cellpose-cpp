@@ -29,7 +29,6 @@ class Cyto3ONNX(nn.Module):
 
     def forward(self, img, img_size, channels, diameter, niter):
         print("--- Cyto3ONNX forward", img.shape, img_size, channels, diameter, niter)
-
         img = set_img_channels(img, channels)
         img = img.squeeze()
         img = torch.permute(img, (2, 0, 1))
@@ -40,8 +39,6 @@ class Cyto3ONNX(nn.Module):
         img = torch.permute(img, (1, 2, 0))
         img = img[np.newaxis, ...]
         print(img.shape)
-
-        # return img, img
 
         print("--- _run_net begin")
         bsize = 224
@@ -63,8 +60,6 @@ class Cyto3ONNX(nn.Module):
         print(styles.shape)
         print("--- _run_net end")
 
-        # return yf, dP
-
         print("--- follow_flows begin")
         dP = dP[:, 0]
         cellprob = cellprob[0]
@@ -81,16 +76,12 @@ class Cyto3ONNX(nn.Module):
         print(p_final)
         print("--- follow_flows end")
 
-        # return p_final, p_final
-
         print("--- get_masks_torch begin")
         max_size_fraction = 0.4
         mask = self.get_masks_torch(p_final, inds, dP.shape[1:], img_size, max_size_fraction)
         mask = torch.reshape(mask, (img_size[0], img_size[1]))
         del p_final
         print("--- get_masks_torch end")
-
-        # return mask, mask
         
         print("--- remove_bad_flow_masks begin")
         mask, flow_errors = self.remove_bad_flow_masks(mask, dP)
@@ -337,19 +328,6 @@ class Cyto3ONNX(nn.Module):
         mu0 = torch.zeros((2, Ly0, Lx0), dtype=torch.float64, device=self.device)
         mu0[:, yx[0] - 1, yx[1] - 1] = mu
         return mu0
-
-def set_img_channels_normalize99(img, channels, device):
-    img = set_img_channels(img, channels)
-    img = img.squeeze()
-    img = torch.permute(img, (2, 0, 1))
-    percentiles = torch.zeros((2), dtype=torch.int, device=device)
-    percentiles[0] = 1
-    percentiles[1] = 99
-    img = set_img_normalized(img, percentiles)
-    img = torch.permute(img, (1, 2, 0))
-    img = img[np.newaxis, ...]
-    print(img.shape)
-    return img
 
 @torch.jit.script
 def set_img_channels(img, channels):
@@ -602,10 +580,11 @@ def export_cyte3_onnx(image_path, device):
 
 def import_onnx(image_path, device):
     onnx_path = "cyto3.onnx"
-    providers=onnxruntime.get_available_providers()
-    print(providers)
+    print(onnxruntime.get_available_providers())
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
+    else:
+        providers=["CUDAExecutionProvider"]
     session = onnxruntime.InferenceSession(
         onnx_path, 
         providers=providers
@@ -666,9 +645,6 @@ def get_cyte3_inputs(img, niter_default=200, device=torch.device("cpu")):
     print("diameter", diameter)
     niter = torch.tensor([niter_default], dtype=torch.int64)
     print("niter", niter)
-
-    # img = set_img_channels_normalize99(img, channels, device)
-
     return img, img_size, channels, diameter, niter
 
 def show_mask(img_original, img_size, mask, flow_errors, device):
