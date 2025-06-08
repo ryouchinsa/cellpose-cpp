@@ -543,7 +543,7 @@ def show(image_path, device):
     model.eval()
     img = cv2.imread(image_path)
     img_original = img
-    img_resized, img_size, channels, diameter, niter = get_cyte3_inputs(img, device=device)
+    img_resized, img_size, channels, diameter, niter = get_cyto3_inputs(img, device=device)
     start = time.perf_counter()
     mask, flow_errors = model.forward(img_resized, img_size, channels, diameter, niter)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
@@ -554,7 +554,7 @@ def show(image_path, device):
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, device)
 
-def export_cyte3_onnx(image_path, device):
+def export_cyto3_onnx(image_path, device):
     model_type = 'cyto3'
     model_path = cp_model.model_path(model_type)
     print(model_path)
@@ -564,7 +564,7 @@ def export_cyte3_onnx(image_path, device):
     model = Cyto3ONNX(model_type, device)
     model.eval()
     img = cv2.imread(image_path)
-    img_resized, img_size, channels, diameter, niter = get_cyte3_inputs(img, niter_default=20, device=device)
+    img_resized, img_size, channels, diameter, niter = get_cyto3_inputs(img, niter_default=20, device=device)
     torch.onnx.export(
         model,
         (
@@ -614,7 +614,7 @@ def import_onnx(image_path, device):
     print(output_shapes)
     img = cv2.imread(image_path)
     img_original = img
-    img_resized, img_size, channels, diameter, niter = get_cyte3_inputs(img, device=device)
+    img_resized, img_size, channels, diameter, niter = get_cyto3_inputs(img, device=device)
     start = time.perf_counter()
     inputs = [
         img_resized.cpu().numpy(), 
@@ -639,7 +639,7 @@ def import_onnx(image_path, device):
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, device)
 
-def get_cyte3_inputs(img, niter_default=200, device=torch.device("cpu")):
+def get_cyto3_inputs(img, niter_default=200, device=torch.device("cpu")):
     img = cv2.resize(img, (512, 512))
     # img = cv2.resize(img, (224, 224))
     print(img.shape)
@@ -750,7 +750,7 @@ if __name__ == "__main__":
     if args.mode == "show":
         show(args.image, device)
     elif args.mode == "export":
-        export_cyte3_onnx(args.image, device)
+        export_cyto3_onnx(args.image, device)
     elif args.mode == "import":
         import_onnx(args.image, device)
 
