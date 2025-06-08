@@ -26,8 +26,8 @@ To check how the ONNX model works.
 python cyto3_onnx.py --mode import
 ```
 
-Download an exported Cellpose cyte3 ONNX model.
-- [Cellpose cyte3](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx.zip)
+Download an exported Cellpose cyto3 ONNX model.
+- [Cellpose cyto3](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx.zip)
 
 Download ONNX Runtime.
 - [onnxruntime-osx-universal2-1.20.0.tgz](https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-osx-universal2-1.20.0.tgz) for macOS
