@@ -547,7 +547,12 @@ def show(image_path, device):
     start = time.perf_counter()
     mask, flow_errors = model.forward(img_resized, img_size, channels, diameter, niter)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
-    show_mask(img_original, img_size, mask, flow_errors, device)
+    start = time.perf_counter()
+    flow_threshold = 0.8
+    min_size = 15
+    mask = post_process(mask, flow_errors, flow_threshold, min_size, device)
+    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+    show_mask(img_original, img_size, mask, device)
 
 def export_cyte3_onnx(image_path, device):
     model_type = 'cyto3'
@@ -625,9 +630,14 @@ def import_onnx(image_path, device):
         }
     )
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+    start = time.perf_counter()
     mask = torch.from_numpy(mask).to(device)
     flow_errors = torch.from_numpy(flow_errors).to(device)
-    show_mask(img_original, img_size, mask, flow_errors, device)
+    flow_threshold = 0.8
+    min_size = 15
+    mask = post_process(mask, flow_errors, flow_threshold, min_size, device)
+    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+    show_mask(img_original, img_size, mask, device)
 
 def get_cyte3_inputs(img, niter_default=200, device=torch.device("cpu")):
     img = cv2.resize(img, (512, 512))
@@ -647,13 +657,7 @@ def get_cyte3_inputs(img, niter_default=200, device=torch.device("cpu")):
     print("niter", niter)
     return img, img_size, channels, diameter, niter
 
-def show_mask(img_original, img_size, mask, flow_errors, device):
-    print_mask(mask)
-    print_mask(flow_errors, print_more=True)
-    flow_threshold = 0.8
-    min_size = 15
-    mask = post_process(mask, flow_errors, flow_threshold, min_size, device)
-    print_mask(mask)
+def show_mask(img_original, img_size, mask, device):
     show_original = True;
     if show_original:
         mask = torch.reshape(mask, (1, 1, mask.shape[0], mask.shape[1]))
@@ -684,11 +688,14 @@ def show_mask(img_original, img_size, mask, flow_errors, device):
 
 def post_process(mask, flow_errors, flow_threshold, min_size, device):
     print("--- post_process begin")
+    print_mask(mask)
+    print_mask(flow_errors, print_more=True)
     mask = remove_bad_flow_masks(mask, flow_errors, flow_threshold)
     labels_num = torch.max(mask)
     slices = torch.zeros((labels_num, 4), dtype=torch.int64, device=device)
     slices = find_objects(mask, slices)
     mask = fill_holes_and_remove_small_masks(mask, min_size, slices, device)
+    print_mask(mask)
     print("--- post_process end")
     return mask
 
