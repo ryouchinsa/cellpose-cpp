@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
   float flow_threshold = 0.4;
   int min_size = 15;
   cv::Mat outputMask = cv::Mat(inputSize.height, inputSize.width, CV_8UC1, cv::Scalar(0));
-  bool successPreprocessImage = cyto3.preprocessImage(image, inputSize, channels, diameter, niter, flow_threshold, min_size, FLAGS_device, &outputMask);
+  bool successPreprocessImage = cyto3.preprocessImage(image, inputSize, channels, diameter, niter, flow_threshold, min_size, &outputMask);
   if(!successPreprocessImage){
     std::cout<<"preprocessImage error"<<std::endl;
     return 1;
@@ -58,16 +58,7 @@ int main(int argc, char** argv) {
   flow_threshold = 0.8;
   min_size = 100;
   outputMask = cv::Mat(inputSize.height, inputSize.width, CV_8UC1, cv::Scalar(0));
-  cyto3.changeFlowThreshold(flow_threshold, min_size, FLAGS_device, &outputMask);
-  saveOutputMask(outputMask, imageSize, flow_threshold, min_size);
-  end = std::chrono::steady_clock::now();
-  std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
-
-  begin = std::chrono::steady_clock::now();
-  flow_threshold = 0.8;
-  min_size = 100;
-  outputMask = cv::Mat(inputSize.height, inputSize.width, CV_8UC1, cv::Scalar(0));
-  cyto3.changeFlowThreshold(flow_threshold, min_size, "cpu", &outputMask);
+  cyto3.changeFlowThreshold(flow_threshold, min_size, &outputMask);
   saveOutputMask(outputMask, imageSize, flow_threshold, min_size);
   end = std::chrono::steady_clock::now();
   std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
