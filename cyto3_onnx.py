@@ -550,7 +550,7 @@ def show(image_path, device):
     start = time.perf_counter()
     flow_threshold = 0.8
     min_size = 15
-    mask = post_process(mask, flow_errors, flow_threshold, min_size, device)
+    mask = post_process(mask, flow_errors, flow_threshold, min_size)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, device)
 
@@ -631,11 +631,11 @@ def import_onnx(image_path, device):
     )
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     start = time.perf_counter()
-    mask = torch.from_numpy(mask).to(device)
-    flow_errors = torch.from_numpy(flow_errors).to(device)
+    mask = torch.from_numpy(mask)
+    flow_errors = torch.from_numpy(flow_errors)
     flow_threshold = 0.8
     min_size = 15
-    mask = post_process(mask, flow_errors, flow_threshold, min_size, device)
+    mask = post_process(mask, flow_errors, flow_threshold, min_size)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, device)
 
@@ -686,15 +686,15 @@ def show_mask(img_original, img_size, mask, device):
     plt.gcf().set_facecolor((41/255.0, 44/255.0, 47/255.0))
     plt.show()
 
-def post_process(mask, flow_errors, flow_threshold, min_size, device):
+def post_process(mask, flow_errors, flow_threshold, min_size):
     print("--- post_process begin")
     print_mask(mask)
     print_mask(flow_errors, print_more=True)
     mask = remove_bad_flow_masks(mask, flow_errors, flow_threshold)
     labels_num = torch.max(mask)
-    slices = torch.zeros((labels_num, 4), dtype=torch.int64, device=device)
+    slices = torch.zeros((labels_num, 4), dtype=torch.int64)
     slices = find_objects(mask, slices)
-    mask = fill_holes_and_remove_small_masks(mask, min_size, slices, device)
+    mask = fill_holes_and_remove_small_masks(mask, min_size, slices)
     print_mask(mask)
     print("--- post_process end")
     return mask
@@ -709,7 +709,7 @@ def remove_bad_flow_masks(mask, flow_errors, flow_threshold):
     print(mask[mask > 0])
     return mask
 
-def fill_holes_and_remove_small_masks(masks, min_size, slices, device):
+def fill_holes_and_remove_small_masks(masks, min_size, slices):
     j = 0
     for i, slc in enumerate(slices):
         msk = masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1] == (i + 1)
@@ -719,9 +719,9 @@ def fill_holes_and_remove_small_masks(masks, min_size, slices, device):
         elif npix > 0:
             masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = 0
             msk[int(msk.shape[0] * 0.425):int(msk.shape[0] * 0.575), int(msk.shape[1] * 0.425):int(msk.shape[1] * 0.575)] = 0
-            msk = np.array(msk.cpu())
+            msk = np.array(msk)
             msk = fill_voids.fill(msk)
-            msk = torch.from_numpy(msk).to(device)
+            msk = torch.from_numpy(msk)
             masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = (j + 1)
             j += 1
     return masks
