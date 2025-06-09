@@ -3,7 +3,7 @@ This code is to run a [Cellpose](https://github.com/MouseLand/cellpose) ONNX mod
 
 ![img00](https://github.com/user-attachments/assets/7c78cb97-12fe-41b5-80d7-bd2e12179313)
 
-Install [CUDA, cuDNN, PyTorch, and LibTorch](https://rectlabel.com/pytorch/).
+Install [CUDA, cuDNN, PyTorch, LibTorch, and ONNX Runtime](https://rectlabel.com/pytorch/).
 
 Install [Cellpose](https://github.com/MouseLand/cellpose/tree/v3.1.1).
 ```bash
