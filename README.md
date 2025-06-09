@@ -23,8 +23,6 @@ unzip demo_images.zip
 cp -r demo_images cellpose-cpp/
 ```
 
-![folder_structure](https://github.com/user-attachments/assets/13ba2b99-b135-4608-b757-2775010178b7)
-
 Export an ONNX model and check how the ONNX model works.
 
 ```bash
