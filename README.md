@@ -29,12 +29,10 @@ Export an ONNX model and check how the ONNX model works.
 
 ```bash
 python cyto3_onnx.py --mode export
-python cyto3_onnx.py --mode import --device cpu/cuda:0
+python cyto3_onnx.py --mode import --device cuda:0
 cp cyto3.onnx cellpose-cpp/
 cd cellpose-cpp
 ```
-
-![cellpose_cpp](https://github.com/user-attachments/assets/3a93316d-d205-45c5-8ebe-eb2e0cbf09ef)
 
 Build and run.
 
