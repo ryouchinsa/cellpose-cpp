@@ -34,6 +34,9 @@ cp cyto3.onnx cellpose-cpp/
 cd cellpose-cpp
 ```
 
+Download an exported Cellpose cyto3 ONNX model.
+- [Cellpose cyto3](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx.zip)
+
 Build and run.
 
 ```bash
