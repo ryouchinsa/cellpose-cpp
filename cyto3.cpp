@@ -169,42 +169,38 @@ void fillHolesAndRemoveSmallMasks(torch::Tensor mask, int min_size){
     if(npix < min_size){
       msk.index_put_({msk_index[0], msk_index[1]}, 0);
     }else{
-      msk.index_put_({msk_index[0], msk_index[1]}, j + 1);
-      msk.index_put_({Slice(msk.size(0) * 0.425, msk.size(0) * 0.575), Slice(msk.size(1) * 0.425, msk.size(1) * 0.575)}, 0);
       msk = fill_voids(msk);
+      msk_index = torch::where(msk > 0);
+      msk.index_put_({msk_index[0], msk_index[1]}, j + 1);
       j++;
     }
     mask.index_put_({Slice(ymin, ymax), Slice(xmin, xmax)}, msk);
   }
 }
 
-void postProcess(torch::Tensor mask, torch::Tensor flowErrors, float flow_threshold, int min_size, cv::Mat *outputMask){
+torch::Tensor postProcess(torch::Tensor mask, torch::Tensor flowErrors, float flow_threshold, int min_size){
   torch::set_num_threads(1);
   mask = removeBadFlowMasks(mask, flowErrors, flow_threshold);
   fillHolesAndRemoveSmallMasks(mask, min_size);
-  for (int i = 0; i < (*outputMask).rows; i++) {
-    for (int j = 0; j < (*outputMask).cols; j++) {
-      (*outputMask).at<uchar>(i, j) = mask[i][j].item<int>() > 0 ? 255 : 0;
-    }
-  }
+  return mask;
 }
 
-void Cyto3::changeFlowThreshold(float flow_threshold, int min_size, cv::Mat *outputMask){
+torch::Tensor Cyto3::changeFlowThreshold(float flow_threshold, int min_size){
   torch::Tensor mask = torch::from_blob(maskVector.data(), {inputShapeEncoder[2], inputShapeEncoder[3]}, torch::kInt64);
   torch::Tensor flowErrors = torch::from_blob(flowErrorsVector.data(), {(int64_t)flowErrorsVector.size()}, torch::kFloat64);
-  postProcess(mask, flowErrors, flow_threshold, min_size, outputMask);
+  return postProcess(mask, flowErrors, flow_threshold, min_size);
 }
 
-bool Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size, cv::Mat *outputMask){
+torch::Tensor Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size){
   try{
     preprocessingStart();
     if(image.size() != cv::Size((int)inputShapeEncoder[3], (int)inputShapeEncoder[2])){
       preprocessingEnd();
-      return false;
+      return torch::zeros(0);
     }
     if(image.channels() != 3){
       preprocessingEnd();
-      return false;
+      return torch::zeros(0);
     }
     std::vector<Ort::Value> inputTensors;
     std::vector<float> inputTensorValuesFloat;    
@@ -238,13 +234,19 @@ bool Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, con
    
     if(terminating){
       preprocessingEnd();
-      return false;
+      return torch::zeros(0);
     }
     runOptionsEncoder.UnsetTerminate();
     std::vector<const char*> inputNames = getInputNames(sessionEncoder);
     std::vector<const char*> outputNames = getOutputNames(sessionEncoder);
     auto outputTensors =  sessionEncoder->Run(runOptionsEncoder, inputNames.data(), inputTensors.data(), inputTensors.size(), outputNames.data(), outputNames.size());
-    
+    for (size_t i = 0; i < inputNames.size(); ++i) {
+      delete [] inputNames[i];
+    }
+    for (size_t i = 0; i < outputNames.size(); ++i) {
+      delete [] outputNames[i];
+    }
+
     auto maskValues = outputTensors[0].GetTensorMutableData<int64_t>();
     auto maskShape = outputTensors[0].GetTensorTypeAndShapeInfo().GetShape();
     torch::Tensor mask = torch::from_blob(maskValues, {maskShape[0], maskShape[1]}, torch::kInt64);
@@ -255,21 +257,14 @@ bool Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, con
     torch::Tensor flowErrors = torch::from_blob(flowErrorsValues, {flowErrorsShape[0]}, torch::kFloat64);
     flowErrorsVector.assign(flowErrors.data_ptr<double>(), flowErrors.data_ptr<double>() + flowErrors.numel());
 
-    postProcess(mask, flowErrors, flow_threshold, min_size, outputMask);
-    
-    for (size_t i = 0; i < inputNames.size(); ++i) {
-      delete [] inputNames[i];
-    }
-    for (size_t i = 0; i < outputNames.size(); ++i) {
-      delete [] outputNames[i];
-    }
+    mask = postProcess(mask, flowErrors, flow_threshold, min_size);
+    preprocessingEnd();
+    return mask;
   }catch(Ort::Exception& e){
     std::cout << e.what() << std::endl;
     preprocessingEnd();
-    return false;
+    return torch::zeros(0);
   }
-  preprocessingEnd();
-  return true;
 }
 
 void Cyto3::preprocessingStart(){
@@ -281,7 +276,68 @@ void Cyto3::preprocessingEnd(){
   terminating = false;
 }
 
+void HSVtoRGB(float& fR, float& fG, float& fB, float& fH, float& fS, float& fV) {
+  float fC = fV * fS; // Chroma
+  float fHPrime = fmod(fH / 60.0, 6);
+  float fX = fC * (1 - fabs(fmod(fHPrime, 2) - 1));
+  float fM = fV - fC;
+  if(0 <= fHPrime && fHPrime < 1) {
+    fR = fC;
+    fG = fX;
+    fB = 0;
+  } else if(1 <= fHPrime && fHPrime < 2) {
+    fR = fX;
+    fG = fC;
+    fB = 0;
+  } else if(2 <= fHPrime && fHPrime < 3) {
+    fR = 0;
+    fG = fC;
+    fB = fX;
+  } else if(3 <= fHPrime && fHPrime < 4) {
+    fR = 0;
+    fG = fX;
+    fB = fC;
+  } else if(4 <= fHPrime && fHPrime < 5) {
+    fR = fX;
+    fG = 0;
+    fB = fC;
+  } else if(5 <= fHPrime && fHPrime < 6) {
+    fR = fC;
+    fG = 0;
+    fB = fX;
+  } else {
+    fR = 0;
+    fG = 0;
+    fB = 0;
+  }
+  fR += fM;
+  fG += fM;
+  fB += fM;
+}
 
+void saveOutputMask(torch::Tensor mask, cv::Size imageSize, float flow_threshold, int min_size){
+  int labels_num = getLabelsNum(mask);
+  std::cout<<labels_num<<std::endl;
+  torch::Tensor maskRGB = torch::zeros({mask.size(0), mask.size(1), 3}, torch::kU8);
+  for (int i = 0; i < labels_num; i++) {
+    auto msk_index = torch::where(mask == (i + 1));
+    float fR = 0, fG = 0, fB = 0, fH = 0, fS = 0, fV = 0;
+    fH = 360.0 * i / labels_num;
+    fS = 0.5;
+    fV = 0.5;
+    HSVtoRGB(fR, fG, fB, fH, fS, fV);
+    maskRGB.index_put_({msk_index[0], msk_index[1], 0}, fR * 255);
+    maskRGB.index_put_({msk_index[0], msk_index[1], 1}, fG * 255);
+    maskRGB.index_put_({msk_index[0], msk_index[1], 2}, fB * 255);
+  }
+  cv::Mat outputMask = cv::Mat(mask.size(0), mask.size(1), CV_8UC3, maskRGB.data_ptr());
+  std::stringstream ss;
+  ss << std::fixed << std::setprecision(2) << flow_threshold;  
+  std::string fileName = "outputMask" + ss.str() + "_" + std::to_string(min_size);
+  cv::imwrite(fileName + ".png", outputMask);
+  cv::resize(outputMask, outputMask, imageSize);
+  cv::imwrite(fileName + "_original.png", outputMask);
+}
 
 
 

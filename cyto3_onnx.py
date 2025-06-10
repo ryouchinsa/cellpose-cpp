@@ -669,10 +669,7 @@ def show_mask(img_original, img_size, mask, device):
         mask = mask.long()
         mask = mask.squeeze()
     mask = np.array(mask.cpu())
-    mask255 = np.copy(mask)
-    mask255[mask255 > 0] = 255
-    mask255 = mask255.astype(np.uint8)
-    cv2.imwrite("mask.png", mask255)
+    save_mask(mask)
     if show_original:
         plt.imshow(img_original)
     else:
@@ -685,6 +682,16 @@ def show_mask(img_original, img_size, mask, device):
     plt.tight_layout()
     plt.gcf().set_facecolor((41/255.0, 44/255.0, 47/255.0))
     plt.show()
+
+def save_mask(mask):
+    import colorsys
+    mask_image = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
+    labels_num = mask.max()
+    RGB_tuples = [colorsys.hsv_to_rgb(x*1.0/labels_num, 0.5, 0.5) for x in range(labels_num)]
+    for i in range(1, int(labels_num) + 1):
+        msk = mask == i
+        mask_image[msk, :] = tuple([255*x for x in RGB_tuples[i - 1]])
+    cv2.imwrite("mask.png", mask_image)
 
 def post_process(mask, flow_errors, flow_threshold, min_size):
     print("--- post_process begin")
@@ -717,8 +724,6 @@ def fill_holes_and_remove_small_masks(masks, min_size, slices):
         if npix < min_size:
             masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = 0
         elif npix > 0:
-            masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = 0
-            msk[int(msk.shape[0] * 0.425):int(msk.shape[0] * 0.575), int(msk.shape[1] * 0.425):int(msk.shape[1] * 0.575)] = 0
             msk = np.array(msk)
             msk = fill_voids.fill(msk)
             msk = torch.from_numpy(msk)
