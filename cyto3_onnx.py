@@ -43,7 +43,8 @@ class Cyto3ONNX(nn.Module):
         print("--- _run_net begin")
         bsize = 224
         tile_overlap = 0.1
-        yf, styles = self.run_net(self.net, img, img_size, bsize, tile_overlap, diameter)
+        batch_size = 8
+        yf, styles = self.run_net(self.net, img, img_size, bsize, tile_overlap, batch_size, diameter)
         yf = torch.nn.functional.interpolate(
             yf,
             size=(img_size[1], img_size[0]),
@@ -88,7 +89,7 @@ class Cyto3ONNX(nn.Module):
         print("--- remove_bad_flow_masks end")
         return mask, flow_errors
 
-    def run_net(self, net, imgi, img_size, bsize, tile_overlap, diameter):
+    def run_net(self, net, imgi, img_size, bsize, tile_overlap, batch_size, diameter):
         nout = net.nout
         Lz, Ly0, Lx0, nchan = imgi.shape 
         img_size_resize = img_size * self.diam_mean // diameter
@@ -154,7 +155,14 @@ class Cyto3ONNX(nn.Module):
         stylea = torch.zeros((nyx[0] * nyx[1], 256), dtype=torch.float32, device=self.device)        
         print(ya.shape)
         print(stylea.shape)
-        ya, stylea = net_forward(net, IMGa)
+
+        slices_size = torch.zeros(1, dtype=torch.int64, device=self.device)
+        slices_size = get_slices_size(IMGa, batch_size, slices_size)
+        slices = torch.zeros((slices_size[0], 2), dtype=torch.int64, device=self.device)
+        slices = get_batch_slices(IMGa, batch_size, slices)
+        print(slices)
+        for i in range(slices.shape[0]):
+            ya[slices[i][0]:slices[i][1]], stylea[slices[i][0]:slices[i][1]] = net_forward(net, IMGa[slices[i][0]:slices[i][1]])
 
         Navg = torch.zeros((img_size_pad[1], img_size_pad[0]), dtype=torch.float32, device=self.device)
         yfi = torch.zeros((ya.shape[1], img_size_pad[1], img_size_pad[0]), dtype=torch.float32, device=self.device)
@@ -391,6 +399,26 @@ def set_imgb_to_IMG(imgb, ystart, xstart, lyx, ysub, xsub, IMG):
             xsub[j * xstart.shape[0] + i, 1] = x1
             IMG[j, i] = imgb[0, :, y0:y1, x0:x1]
     return IMG
+
+@torch.jit.script
+def get_slices_size(IMGa, batch_size: int, slices_size):
+    total_size = IMGa.shape[0]
+    size = int(total_size / batch_size)
+    if(total_size % batch_size != 0):
+        size += 1
+    slices_size[0] = size
+    return slices_size
+
+@torch.jit.script
+def get_batch_slices(IMGa, batch_size: int, slices):
+    total_size = IMGa.shape[0]
+    for i in range(slices.shape[0]):
+        slices[i, 0] = i * batch_size
+        if i < slices.shape[0] - 1:
+            slices[i, 1] = (i + 1) * batch_size
+        else:
+            slices[i, 1] = total_size
+    return slices
 
 def net_forward(net, x):
     print("--- net_forward")
