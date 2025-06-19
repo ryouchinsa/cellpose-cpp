@@ -5,30 +5,47 @@ import cv2
 import onnx
 import onnxruntime
 import matplotlib.pyplot as plt
-from cellpose import utils, io, models, plot
-import cellpose.models as cp_model
-from cellpose.resnet_torch import CPnet
+from cellpose import utils, io, models, plot, vit_sam
+from cellpose.vit_sam import Transformer
 import fill_voids
 import os
 import time
 import argparse
+from pathlib import Path
+from natsort import natsorted
 
-class Cyto3ONNX(nn.Module):
+import logging
+models_logger = logging.getLogger(__name__)
 
-    def __init__(self, model_type="cyto3", device=torch.device("cpu")):
-        super(Cyto3ONNX, self).__init__()
+_CPSAM_MODEL_URL = "https://huggingface.co/mouseland/cellpose-sam/resolve/main/cpsam"
+_MODEL_DIR_ENV = os.environ.get("CELLPOSE_LOCAL_MODELS_PATH")
+_MODEL_DIR_DEFAULT = Path.home().joinpath(".cellpose", "models")
+MODEL_DIR = Path(_MODEL_DIR_ENV) if _MODEL_DIR_ENV else _MODEL_DIR_DEFAULT
+
+def cache_CPSAM_model_path():
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    cached_file = os.fspath(MODEL_DIR.joinpath('cpsam'))
+    if not os.path.exists(cached_file):
+        models_logger.info('Downloading: "{}" to {}\n'.format(_CPSAM_MODEL_URL, cached_file))
+        utils.download_url_to_file(_CPSAM_MODEL_URL, cached_file, progress=True)
+    return cached_file
+
+class CPSAMONNX(nn.Module):
+
+    def __init__(self, pretrained_model="cpsam", device=torch.device("cpu")):
+        super(CPSAMONNX, self).__init__()
         self.device = device
         self.diam_mean = 30
-        nchan = 2
-        nbase = [32, 64, 128, 256]
-        nbase = [nchan, *nbase]
-        nclasses = 3
-        self.net = CPnet(nbase, nclasses, sz=3, diam_mean=self.diam_mean).to(self.device)
-        model_path = cp_model.model_path(model_type)
-        self.net.load_model(model_path, device=self.device)
+        self.pretrained_model = os.path.join(MODEL_DIR, pretrained_model)
+        dtype = torch.float32
+        self.net = Transformer(dtype=dtype).to(self.device)
+        if not os.path.exists(self.pretrained_model):
+            cache_CPSAM_model_path()
+        models_logger.info(f">>>> loading model {self.pretrained_model}")
+        self.net.load_model(self.pretrained_model, device=self.device)
 
     def forward(self, img, img_size, channels, diameter, niter):
-        print("--- Cyto3ONNX forward", img.shape, img_size, channels, diameter, niter)
+        print("--- CPSAMONNX forward", img.shape, img_size, channels, diameter, niter)
         img = set_img_channels(img, channels)
         img = img.squeeze()
         img = torch.permute(img, (2, 0, 1))
@@ -41,9 +58,9 @@ class Cyto3ONNX(nn.Module):
         print(img.shape)
 
         print("--- _run_net begin")
-        bsize = 224
+        bsize = 256
         tile_overlap = 0.1
-        batch_size = 8
+        batch_size = 32
         yf, styles = self.run_net(self.net, img, img_size, bsize, tile_overlap, batch_size, diameter)
         yf = torch.nn.functional.interpolate(
             yf,
@@ -141,7 +158,7 @@ class Cyto3ONNX(nn.Module):
         print(ystart)
         print(xstart)
 
-        IMG = torch.zeros((ystart.shape[0], xstart.shape[0], nchan, lyx[0], lyx[1]), dtype=torch.float32, device=self.device)
+        IMG = torch.zeros((ystart.shape[0], xstart.shape[0], nchan, lyx[0], lyx[1]), dtype=net.dtype, device=self.device)
         print(IMG.shape)
         ysub = torch.zeros((ystart.shape[0] * xstart.shape[0], 2), dtype=torch.long, device=self.device)
         xsub = torch.zeros((ystart.shape[0] * xstart.shape[0], 2), dtype=torch.long, device=self.device)
@@ -151,8 +168,8 @@ class Cyto3ONNX(nn.Module):
 
         IMGa = torch.reshape(IMG, (nyx[0] * nyx[1], nchan, lyx[0], lyx[1]))
         print(IMGa.shape)
-        ya = torch.zeros((nyx[0] * nyx[1], nout, lyx[0], lyx[1]), dtype=torch.float32, device=self.device)
-        stylea = torch.zeros((nyx[0] * nyx[1], 256), dtype=torch.float32, device=self.device)        
+        ya = torch.zeros((nyx[0] * nyx[1], nout, lyx[0], lyx[1]), dtype=net.dtype, device=self.device)
+        stylea = torch.zeros((nyx[0] * nyx[1], 256), dtype=net.dtype, device=self.device)        
         print(ya.shape)
         print(stylea.shape)
         
@@ -164,12 +181,12 @@ class Cyto3ONNX(nn.Module):
         for i in range(slices.shape[0]):
             ya[slices[i][0]:slices[i][1]], stylea[slices[i][0]:slices[i][1]] = net_forward(net, IMGa[slices[i][0]:slices[i][1]])
 
-        Navg = torch.zeros((img_size_pad[1], img_size_pad[0]), dtype=torch.float32, device=self.device)
-        yfi = torch.zeros((ya.shape[1], img_size_pad[1], img_size_pad[0]), dtype=torch.float32, device=self.device)
+        Navg = torch.zeros((img_size_pad[1], img_size_pad[0]), dtype=net.dtype, device=self.device)
+        yfi = torch.zeros((ya.shape[1], img_size_pad[1], img_size_pad[0]), dtype=net.dtype, device=self.device)
         print(yfi.shape)
 
         sig = 7.5
-        xm = torch.arange(bsize, dtype=torch.float32, device=self.device)
+        xm = torch.arange(bsize, dtype=net.dtype, device=self.device)
         xm = torch.abs(xm - torch.mean(xm))
         mask = 1 / (1 + torch.exp((xm - (bsize / 2 - 20)) / sig))
         mask = mask * mask[:, None]
@@ -341,23 +358,10 @@ class Cyto3ONNX(nn.Module):
 def set_img_channels(img, channels):
     img = torch.permute(img, (0, 2, 3, 1))
     print(img.shape)
-    if torch.min(channels) > 0:
-        img = img[:, :, :, channels - 1]
-    elif channels[0] > 0:
-        channels_tmp = channels.clone()
-        channels_tmp[1] = channels_tmp[0]
-        img = img[:, :, :, channels_tmp - 1]
-        img[:, :, :, 1] = 0
-    elif channels[1] > 0:
-        channels_tmp = channels.clone()
-        channels_tmp[0] = channels_tmp[1]
-        img = img[:, :, :, channels_tmp - 1]
-        img[:, :, :, 0] = 0
-    else:
-        img = img[:, :, :, [0, 0]]
-        img[:, :, :, 1] = 0
-    print(img.shape)
-    return img
+    img_selected_channels = torch.zeros_like(img)
+    img_selected_channels[:, :, :, :channels.shape[0]] = img[:, :, :, channels]
+    print(img_selected_channels.shape)
+    return img_selected_channels
 
 def normalize99(img, percentiles):
     input = torch.flatten(img)
@@ -561,7 +565,7 @@ def set_flow_errors(error, mask, m):
     return m
 
 def show(image_path, device):
-    model = Cyto3ONNX(device=device)
+    model = CPSAMONNX(device=device)
     img = cv2.imread(image_path)
     img_original = img
     img_resized, img_size, channels, diameter, niter = get_inputs(img, device=device)
@@ -574,11 +578,11 @@ def show(image_path, device):
     mask = post_process(mask, flow_errors, flow_threshold, min_size)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask)
-    show_segmentation(img, img_size, channels - 1, mask, dP)
+    show_segmentation(img, img_size, channels, mask, dP)
 
 def export_onnx(image_path, device):
-    onnx_path = "cyto3.onnx"
-    model = Cyto3ONNX(device=device)
+    onnx_path = "cpsam.onnx"
+    model = CPSAMONNX(device=device)
     img = cv2.imread(image_path)
     img_resized, img_size, channels, diameter, niter = get_inputs(img, niter_default=20, device=device)
     torch.onnx.export(
@@ -596,11 +600,11 @@ def export_onnx(image_path, device):
         opset_version=17,
         do_constant_folding=True,
         input_names=["img",  "img_size", "channels", "diameter", "niter"],
-        output_names=["mask", "flow_errors"],
+        output_names=["mask", "flow_errors", "dP"],
     )
 
 def import_onnx(image_path, device):
-    onnx_path = "cyto3.onnx"
+    onnx_path = "cpsam.onnx"
     print(onnxruntime.get_available_providers())
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
@@ -655,7 +659,7 @@ def import_onnx(image_path, device):
     mask = post_process(mask, flow_errors, flow_threshold, min_size)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask)
-    show_segmentation(img, img_size, channels - 1, mask, dP)
+    show_segmentation(img, img_size, channels, mask, dP)
 
 def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     img = cv2.resize(img, (512, 512))
@@ -667,7 +671,7 @@ def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     print(img.shape)
     img_size = torch.tensor([img.shape[2], img.shape[3]], dtype=torch.int64)
     print(img_size)
-    channels = torch.tensor([1, 2], dtype=torch.int64)
+    channels = torch.tensor([0, 1], dtype=torch.int64)
     print("channels", channels)
     diameter = torch.tensor([30], dtype=torch.int64)
     print("diameter", diameter)
@@ -774,7 +778,38 @@ def print_mask(mask, print_more=False):
     print(mask[mask > 0])
     if print_more:
         torch.set_printoptions(edgeitems=3)
-    
+
+def showOriginal(image_path, device):
+    img = io.imread(image_path)
+    first_channel = '0' # @param ['None', 0, 1, 2, 3, 4, 5]
+    second_channel = '1' # @param ['None', 0, 1, 2, 3, 4, 5]
+    third_channel = 'None' # @param ['None', 0, 1, 2, 3, 4, 5]
+    selected_channels = []
+    for i, c in enumerate([first_channel, second_channel, third_channel]):
+      if c == 'None':
+        continue
+      if int(c) > img.shape[-1]:
+        assert False, 'invalid channel index, must have index greater or equal to the number of channels'
+      if c != 'None':
+        selected_channels.append(int(c))
+    print(selected_channels)
+    img_selected_channels = np.zeros_like(img)
+    img_selected_channels[:, :, :len(selected_channels)] = img[:, :, selected_channels]
+    print(img.shape)
+    print(img_selected_channels.shape)
+    model = models.CellposeModel()
+    start = time.perf_counter()
+    flow_threshold = 0.4
+    cellprob_threshold = 0.0
+    tile_norm_blocksize = 0
+    masks, flows, styles = model.eval(img_selected_channels, batch_size=32, flow_threshold=flow_threshold, cellprob_threshold=cellprob_threshold,
+                                      normalize={"tile_norm_blocksize": tile_norm_blocksize})
+    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+    fig = plt.figure(figsize=(12,5))
+    plot.show_segmentation(fig, img_selected_channels, masks, flows[0])
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode",type=str,default="show",required=False,help="show/export/import")
@@ -784,17 +819,11 @@ if __name__ == "__main__":
     device = torch.device(args.device)
     if args.mode == "show":
         show(args.image, device)
+        # showOriginal(args.image, device)
     elif args.mode == "export":
         export_onnx(args.image, device)
     elif args.mode == "import":
         import_onnx(args.image, device)
-
-
-
-
-
-
-
 
 
 
