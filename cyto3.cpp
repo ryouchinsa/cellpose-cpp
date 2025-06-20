@@ -164,13 +164,16 @@ void fillHolesAndRemoveSmallMasks(torch::Tensor mask, int min_size){
     int xmin = slices[i][2].item<int>();
     int xmax = slices[i][3].item<int>() + 1;
     auto msk = mask.index({Slice(ymin, ymax), Slice(xmin, xmax)});
+    // msk.index_put_({Slice(msk.size(0) * 0.425, msk.size(0) * 0.575), Slice(msk.size(1) * 0.425, msk.size(1) * 0.575)}, 0);
     auto msk_index = torch::where(msk == (i + 1));
     int npix = msk_index[0].size(0);
     if(npix < min_size){
       msk.index_put_({msk_index[0], msk_index[1]}, 0);
     }else{
-      msk = fill_voids(msk);
-      msk_index = torch::where(msk > 0);
+      auto msk_i_plus_1 = torch::zeros({msk.size(0), msk.size(1)}, torch::kInt);
+      msk_i_plus_1.index_put_({msk_index[0], msk_index[1]}, 1);
+      msk_i_plus_1 = fill_voids(msk_i_plus_1);
+      msk_index = torch::where(msk_i_plus_1 > 0);
       msk.index_put_({msk_index[0], msk_index[1]}, j + 1);
       j++;
     }

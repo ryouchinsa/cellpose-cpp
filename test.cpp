@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
 
   begin = std::chrono::steady_clock::now();
   flow_threshold = 0.8;
-  min_size = 100;
+  min_size = 15;
   mask = cyto3.changeFlowThreshold(flow_threshold, min_size);
   saveOutputMask(mask, imageSize, flow_threshold, min_size);
   end = std::chrono::steady_clock::now();

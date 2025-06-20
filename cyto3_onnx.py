@@ -659,7 +659,6 @@ def import_onnx(image_path, device):
 
 def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     img = cv2.resize(img, (512, 512))
-    # img = cv2.resize(img, (224, 224))
     print(img.shape)
     img = img.transpose(2, 0, 1)
     img = img[np.newaxis, :, :, :].astype(np.float32)
@@ -686,7 +685,7 @@ def show_mask(img_original, img_size, mask):
         )
         mask = mask.long()
         mask = mask.squeeze()
-    mask = np.array(mask.cpu())
+    mask = mask.detach().cpu().numpy()
     save_mask(mask)
     if show_original:
         plt.imshow(img_original)
@@ -742,19 +741,21 @@ def remove_bad_flow_masks(mask, flow_errors, flow_threshold):
     print(badi.shape)
     print(badi)
     mask = set_labels_zero(badi, mask)
-    print(mask.shape)
-    print(mask[mask > 0])
     return mask
 
 def fill_holes_and_remove_small_masks(masks, min_size, slices):
     j = 0
     for i, slc in enumerate(slices):
+        # msk = masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1] == (i + 1)
+        # masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = 0
+        # msk[int(msk.shape[0] * 0.425):int(msk.shape[0] * 0.575), int(msk.shape[1] * 0.425):int(msk.shape[1] * 0.575)] = 0
+        # masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = (i + 1)
         msk = masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1] == (i + 1)
         npix = torch.sum(msk)
         if npix < min_size:
             masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = 0
         elif npix > 0:
-            msk = np.array(msk)
+            msk = msk.detach().cpu().numpy()
             msk = fill_voids.fill(msk)
             msk = torch.from_numpy(msk)
             masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = (j + 1)
@@ -778,7 +779,7 @@ def print_mask(mask, print_more=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode",type=str,default="show",required=False,help="show/export/import")
-    parser.add_argument("--image",type=str,default="demo_images/img00.png",required=False,help="image path")
+    parser.add_argument("--image",type=str,default="../demo_images/img00.png",required=False,help="image path")
     parser.add_argument("--device",type=str,default="cpu",required=False,help="cpu or cuda:0")
     args = parser.parse_args()
     device = torch.device(args.device)

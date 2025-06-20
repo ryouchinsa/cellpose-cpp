@@ -32,9 +32,6 @@ cp cyto3.onnx cellpose-cpp/
 cd cellpose-cpp
 ```
 
-Download an exported Cellpose cyto3 ONNX model.
-- [Cellpose cyto3](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx.zip)
-
 Build and run.
 
 ```bash
@@ -50,3 +47,8 @@ cmake --build build
 # Ubuntu GPU
 ./build/cyto3_cpp_test -encoder="cyto3.onnx" -image="demo_images/img02.png" -device="cuda:0"
 ```
+
+| Model | Size | Time on Apple M1 | Time on g4dn.xlarge |
+| :---: | :---: | :---: | :---: |
+| cpsam.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cpsam.onnx.zip)) | 1.23GB | 40s | 5s |
+| cyto3.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx.zip)) | 27.5MB | 5s | 2s |
