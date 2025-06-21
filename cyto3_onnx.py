@@ -4,6 +4,7 @@ from torch import nn
 import cv2
 import onnx
 import onnxruntime
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from cellpose import utils, io, models, plot
 import cellpose.models as cp_model
@@ -87,7 +88,10 @@ class Cyto3ONNX(nn.Module):
         print("--- remove_bad_flow_masks begin")
         mask, flow_errors = self.remove_bad_flow_masks(mask, dP)
         print("--- remove_bad_flow_masks end")
-        return mask, flow_errors, dP
+        
+        rgb_of_flows = torch.zeros((*dP.shape[1:], 3), dtype=torch.uint8, device=self.device)
+        rgb_of_flows = dx_to_circ(dP, percentiles, rgb_of_flows)
+        return mask, flow_errors, rgb_of_flows
 
     def run_net(self, net, imgi, img_size, bsize, tile_overlap, batch_size, diameter):
         nout = net.nout
@@ -560,21 +564,31 @@ def set_flow_errors(error, mask, m):
         m[i - 1] = torch.sum(error_i[error_i > 0]) / yxi.shape[0]
     return m
 
+@torch.jit.script
+def dx_to_circ(dP, percentiles, rgb):
+    mag = 255 * torch.clamp(normalize99(torch.sqrt(torch.sum(dP**2, dim=0)), percentiles), min=0, max=1)
+    angles = torch.atan2(dP[1], dP[0]) + torch.pi
+    a = 2
+    mag /= a
+    rgb[..., 0] = torch.clamp(mag * (torch.cos(angles) + 1), min=0, max=255)
+    rgb[..., 1] = torch.clamp(mag * (torch.cos(angles + 2 * torch.pi / 3) + 1), min=0, max=255)
+    rgb[..., 2] = torch.clamp(mag * (torch.cos(angles + 4 * torch.pi / 3) + 1), min=0, max=255)
+    return rgb
+
 def show(image_path, device):
     model = Cyto3ONNX(device=device)
     img = cv2.imread(image_path)
     img_original = img
     img_resized, img_size, channels, diameter, niter = get_inputs(img, device=device)
     start = time.perf_counter()
-    mask, flow_errors, dP = model.forward(img_resized, img_size, channels, diameter, niter)
+    mask, flow_errors, rgb_of_flows = model.forward(img_resized, img_size, channels, diameter, niter)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     start = time.perf_counter()
     flow_threshold = 0.8
     min_size = 15
     mask = post_process(mask, flow_errors, flow_threshold, min_size)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
-    show_mask(img_original, img_size, mask)
-    show_segmentation(img, img_size, channels - 1, mask, dP)
+    show_mask(img_original, img_size, mask, rgb_of_flows)
 
 def export_onnx(image_path, device):
     onnx_path = "cyto3.onnx"
@@ -639,7 +653,7 @@ def import_onnx(image_path, device):
         diameter.cpu().numpy(), 
         niter.cpu().numpy(), 
     ]
-    mask, flow_errors, dP = session.run(
+    mask, flow_errors, rgb_of_flows = session.run(
         output_names, 
         {
         input_names[i]: inputs[i] for i in range(len(input_names))
@@ -649,13 +663,12 @@ def import_onnx(image_path, device):
     start = time.perf_counter()
     mask = torch.from_numpy(mask)
     flow_errors = torch.from_numpy(flow_errors)
-    dP = torch.from_numpy(dP)
+    rgb_of_flows = torch.from_numpy(rgb_of_flows)
     flow_threshold = 0.8
     min_size = 15
     mask = post_process(mask, flow_errors, flow_threshold, min_size)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
-    show_mask(img_original, img_size, mask)
-    show_segmentation(img, img_size, channels - 1, mask, dP)
+    show_mask(img_original, img_size, mask, rgb_of_flows)
 
 def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     img = cv2.resize(img, (512, 512))
@@ -674,7 +687,7 @@ def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     print("niter", niter)
     return img, img_size, channels, diameter, niter
 
-def show_mask(img_original, img_size, mask):
+def show_mask(img_original, img_size, mask, rgb_of_flows):
     show_original = True;
     if show_original:
         mask = torch.reshape(mask, (1, 1, mask.shape[0], mask.shape[1]))
@@ -685,31 +698,36 @@ def show_mask(img_original, img_size, mask):
         )
         mask = mask.long()
         mask = mask.squeeze()
+        rgb_of_flows = torch.permute(rgb_of_flows, (2, 0, 1))
+        rgb_of_flows = rgb_of_flows.unsqueeze(0)
+        rgb_of_flows = rgb_of_flows.float()
+        rgb_of_flows = torch.nn.functional.interpolate(
+            rgb_of_flows,
+            size=(img_original.shape[0], img_original.shape[1])
+        )
+        rgb_of_flows = rgb_of_flows.long()
+        rgb_of_flows = rgb_of_flows.squeeze()
+        rgb_of_flows = torch.permute(rgb_of_flows, (1, 2, 0))
     mask = mask.detach().cpu().numpy()
     save_mask(mask)
+    rgb_of_flows = rgb_of_flows.detach().cpu().numpy().astype(np.uint8)
+    cv2.imwrite("rgb_of_flows.jpg", rgb_of_flows)
+    mpl.rcParams['toolbar'] = 'None'
+    fig, axes = plt.subplots(1, 2, figsize=(10,5))
     if show_original:
-        plt.imshow(img_original)
+        axes[0].imshow(img_original)
     else:
         img_resized = cv2.resize(img_original, (int(img_size[0]), int(img_size[1])))
-        plt.imshow(img_resized)
+        axes[0].imshow(img_resized)
+    axes[1].imshow(rgb_of_flows)
     outlines_pred = utils.outlines_list(mask)
     for o in outlines_pred:
-        plt.plot(o[:,0], o[:,1], color=[1,1,0.3], lw=0.75, ls="--")
-    plt.axis('off')
-    plt.tight_layout()
+        axes[0].plot(o[:,0], o[:,1], color=[1,1,0.3], lw=0.75, ls="--")
+    axes[0].axis('off')
+    axes[1].axis('off')
+    fig.tight_layout()
+    fig.canvas.manager.set_window_title('Cellpose')
     plt.gcf().set_facecolor((41/255.0, 44/255.0, 47/255.0))
-    plt.show()
-
-def show_segmentation(img, img_size, channels, mask, dP):
-    selected_channels = channels.cpu().numpy()
-    img_size = img_size.cpu().numpy()
-    img_resized = cv2.resize(img, (img_size[1], img_size[0]))
-    img_selected_channels = np.zeros_like(img_resized)
-    img_selected_channels[:, :, :len(selected_channels)] = img_resized[:, :, selected_channels]
-    flows = plot.dx_to_circ(dP.cpu().numpy())
-    fig = plt.figure(figsize=(12,5))
-    plot.show_segmentation(fig, img_selected_channels, mask.cpu().numpy(), flows)
-    plt.tight_layout()
     plt.show()
 
 def save_mask(mask):
