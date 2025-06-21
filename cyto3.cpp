@@ -194,16 +194,16 @@ torch::Tensor Cyto3::changeFlowThreshold(float flow_threshold, int min_size){
   return postProcess(mask, flowErrors, flow_threshold, min_size);
 }
 
-torch::Tensor Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size){
+std::tuple<torch::Tensor , torch::Tensor > Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size){
   try{
     preprocessingStart();
     if(image.size() != cv::Size((int)inputShapeEncoder[3], (int)inputShapeEncoder[2])){
       preprocessingEnd();
-      return torch::zeros(0);
+      return std::make_tuple(torch::zeros(0), torch::zeros(0));
     }
     if(image.channels() != 3){
       preprocessingEnd();
-      return torch::zeros(0);
+      return std::make_tuple(torch::zeros(0), torch::zeros(0));
     }
     std::vector<Ort::Value> inputTensors;
     std::vector<float> inputTensorValuesFloat;    
@@ -237,7 +237,7 @@ torch::Tensor Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &image
    
     if(terminating){
       preprocessingEnd();
-      return torch::zeros(0);
+      return std::make_tuple(torch::zeros(0), torch::zeros(0));
     }
     runOptionsEncoder.UnsetTerminate();
     std::vector<const char*> inputNames = getInputNames(sessionEncoder);
@@ -260,13 +260,17 @@ torch::Tensor Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &image
     torch::Tensor flowErrors = torch::from_blob(flowErrorsValues, {flowErrorsShape[0]}, torch::kFloat64);
     flowErrorsVector.assign(flowErrors.data_ptr<double>(), flowErrors.data_ptr<double>() + flowErrors.numel());
 
+    auto rgbOfFlowsValues = outputTensors[2].GetTensorMutableData<double>();
+    auto rgbOfFlowsShape = outputTensors[2].GetTensorTypeAndShapeInfo().GetShape();
+    torch::Tensor rgbOfFlows = torch::from_blob(rgbOfFlowsValues, {rgbOfFlowsShape[0], rgbOfFlowsShape[1], rgbOfFlowsShape[2]}, torch::kU8);
+
     mask = postProcess(mask, flowErrors, flow_threshold, min_size);
     preprocessingEnd();
-    return mask;
+    return std::make_tuple(mask, rgbOfFlows);
   }catch(Ort::Exception& e){
     std::cout << e.what() << std::endl;
     preprocessingEnd();
-    return torch::zeros(0);
+    return std::make_tuple(torch::zeros(0), torch::zeros(0));
   }
 }
 
@@ -340,6 +344,14 @@ void saveOutputMask(torch::Tensor mask, cv::Size imageSize, float flow_threshold
   cv::imwrite(fileName + ".png", outputMask);
   cv::resize(outputMask, outputMask, imageSize);
   cv::imwrite(fileName + "_original.png", outputMask);
+}
+
+void saveRGBOfFlows(torch::Tensor rgbOfFlows, cv::Size imageSize){
+  cv::Mat outputMask = cv::Mat(rgbOfFlows.size(0), rgbOfFlows.size(1), CV_8UC3, rgbOfFlows.data_ptr());
+  std::string fileName = "rgbOfFlows";
+  cv::imwrite(fileName + ".jpg", outputMask);
+  cv::resize(outputMask, outputMask, imageSize);
+  cv::imwrite(fileName + "_original.jpg", outputMask);
 }
 
 

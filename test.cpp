@@ -35,12 +35,13 @@ int main(int argc, char** argv) {
   int niter = 200;
   float flow_threshold = 0.4;
   int min_size = 15;
-  torch::Tensor mask = cyto3.preprocessImage(image, inputSize, channels, diameter, niter, flow_threshold, min_size);
+  auto [mask, rgbOfFlows] = cyto3.preprocessImage(image, inputSize, channels, diameter, niter, flow_threshold, min_size);
   if(mask.numel() == 0){
     std::cout<<"preprocessImage error"<<std::endl;
     return 1;
   }
   saveOutputMask(mask, imageSize, flow_threshold, min_size);
+  saveRGBOfFlows(rgbOfFlows, imageSize);
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
 
