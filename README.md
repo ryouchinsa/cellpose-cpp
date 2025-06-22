@@ -24,14 +24,12 @@ Export each ONNX model and check how the ONNX model works.
 
 ```bash
 cd cellpose3
-python cyto3_onnx.py --mode show --image ../demo_images/img00.png
-python cyto3_onnx.py --mode export --image ../demo_images/img02.png
-python cyto3_onnx.py --mode import --image ../demo_images/img00.png
+python cyto3_onnx.py --mode export --image ../demo_images/img02.png --device cuda:0
+python cyto3_onnx.py --mode import --image ../demo_images/img00.png --device cuda:0
 cd ..
 cd cellpose4
-python cpsam_onnx.py --mode show --image ../demo_images/img00.png
-python cpsam_onnx.py --mode export --image ../demo_images/img02.png
-python cpsam_onnx.py --mode import --image ../demo_images/img00.png
+python cpsam_onnx.py --mode export --image ../demo_images/img02.png --device cuda:0
+python cpsam_onnx.py --mode import --image ../demo_images/img00.png --device cuda:0
 cd ..
 cd cellpose-cpp
 ```
@@ -57,5 +55,5 @@ cmake --build build
 | Model | Size | Time on Apple M1 | Time on g4dn.xlarge |
 | :---: | :---: | :---: | :---: |
 | cyto3.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx.zip)) | 27.5MB | 5s | 2s |
-| cpsam.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cpsam.onnx.zip)) | 1.23GB | 40s | 5s |
+| cpsam.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cpsam.onnx.zip)) | 1.22GB | 40s | 5s |
 
