@@ -24,10 +24,18 @@ Export each ONNX model and check how the ONNX model works.
 
 ```bash
 cd cellpose3
+# macOS
+python cyto3_onnx.py --mode export --image ../demo_images/img02.png --device cpu
+python cyto3_onnx.py --mode import --image ../demo_images/img00.png --device cpu
+# Ubuntu GPU
 python cyto3_onnx.py --mode export --image ../demo_images/img02.png --device cuda:0
 python cyto3_onnx.py --mode import --image ../demo_images/img00.png --device cuda:0
 cd ..
 cd cellpose4
+# macOS
+python cpsam_onnx.py --mode export --image ../demo_images/img02.png --device cpu
+python cpsam_onnx.py --mode import --image ../demo_images/img00.png --device cpu
+# Ubuntu GPU
 python cpsam_onnx.py --mode export --image ../demo_images/img02.png --device cuda:0
 python cpsam_onnx.py --mode import --image ../demo_images/img00.png --device cuda:0
 cd ..
