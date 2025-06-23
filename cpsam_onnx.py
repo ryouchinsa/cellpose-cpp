@@ -639,15 +639,7 @@ def import_onnx(image_path, device):
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
     else:
-        # providers=["CUDAExecutionProvider"]
-        providers = [
-            ('CUDAExecutionProvider', {
-                'device_id': 0,
-                # 'arena_extend_strategy': 'kNextPowerOfTwo',
-                'gpu_mem_limit': 2 * 1024 * 1024 * 1024,
-                # 'cudnn_conv_algo_search': 'EXHAUSTIVE',
-                # 'do_copy_in_default_stream': True,
-            })]
+        providers=["CUDAExecutionProvider"]
     session = onnxruntime.InferenceSession(
         onnx_path, 
         providers=providers
