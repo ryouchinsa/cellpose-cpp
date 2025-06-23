@@ -621,6 +621,17 @@ def export_onnx(image_path, device):
         input_names=["img",  "img_size", "channels", "diameter", "niter"],
         output_names=["mask", "flow_errors", "dP"],
     )
+    quantize = False
+    if quantize:
+        from onnxruntime.quantization import QuantType
+        from onnxruntime.quantization.quantize import quantize_dynamic
+        quantize_dynamic(
+            model_input=onnx_path,
+            model_output=onnx_path,
+            per_channel=False,
+            reduce_range=False,
+            weight_type=QuantType.QUInt8,
+        )
 
 def import_onnx(image_path, device):
     onnx_path = "cpsam.onnx"
@@ -628,7 +639,15 @@ def import_onnx(image_path, device):
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
     else:
-        providers=["CUDAExecutionProvider"]
+        # providers=["CUDAExecutionProvider"]
+        providers = [
+            ('CUDAExecutionProvider', {
+                'device_id': 0,
+                # 'arena_extend_strategy': 'kNextPowerOfTwo',
+                'gpu_mem_limit': 2 * 1024 * 1024 * 1024,
+                # 'cudnn_conv_algo_search': 'EXHAUSTIVE',
+                # 'do_copy_in_default_stream': True,
+            })]
     session = onnxruntime.InferenceSession(
         onnx_path, 
         providers=providers

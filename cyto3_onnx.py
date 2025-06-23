@@ -619,7 +619,15 @@ def import_onnx(image_path, device):
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
     else:
-        providers=["CUDAExecutionProvider"]
+        # providers=["CUDAExecutionProvider"]
+        providers = [
+            ('CUDAExecutionProvider', {
+                'device_id': 0,
+                # 'arena_extend_strategy': 'kNextPowerOfTwo',
+                'gpu_mem_limit': 2 * 1024 * 1024 * 1024,
+                # 'cudnn_conv_algo_search': 'EXHAUSTIVE',
+                # 'do_copy_in_default_stream': True,
+            })]
     session = onnxruntime.InferenceSession(
         onnx_path, 
         providers=providers
@@ -764,10 +772,6 @@ def remove_bad_flow_masks(mask, flow_errors, flow_threshold):
 def fill_holes_and_remove_small_masks(masks, min_size, slices):
     j = 0
     for i, slc in enumerate(slices):
-        # msk = masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1] == (i + 1)
-        # masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = 0
-        # msk[int(msk.shape[0] * 0.425):int(msk.shape[0] * 0.575), int(msk.shape[1] * 0.425):int(msk.shape[1] * 0.575)] = 0
-        # masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = (i + 1)
         msk = masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1] == (i + 1)
         npix = torch.sum(msk)
         if npix < min_size:

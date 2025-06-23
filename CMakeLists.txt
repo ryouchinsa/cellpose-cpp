@@ -8,7 +8,7 @@ find_package(gflags CONFIG REQUIRED)
 message("TORCH_INCLUDE_DIRS: ${TORCH_INCLUDE_DIRS}")
 message("TORCH_LIBRARIES: ${TORCH_LIBRARIES}")
 
-add_library(cyto3_cpp SHARED cyto3.h cyto3.cpp fill_voids.h fill_voids.cpp)
+add_library(cyto3_cpp SHARED cyto3.h cyto3.cpp fill_voids.hpp)
 
 target_compile_features(cyto3_cpp PUBLIC cxx_std_14)
 
