@@ -7,7 +7,7 @@
 #include <opencv2/core.hpp>
 #include <torch/torch.h>
 #include <onnxruntime_cxx_api.h>
-#include "fill_voids.h"
+#include "fill_voids.hpp"
 
 class Cyto3 {
   std::unique_ptr<Ort::Session> sessionEncoder;

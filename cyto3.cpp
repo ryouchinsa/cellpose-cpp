@@ -170,9 +170,12 @@ void fillHolesAndRemoveSmallMasks(torch::Tensor mask, int min_size){
     if(npix < min_size){
       msk.index_put_({msk_index[0], msk_index[1]}, 0);
     }else{
-      auto msk_i_plus_1 = torch::zeros({msk.size(0), msk.size(1)}, torch::kInt);
+      auto msk_i_plus_1 = torch::zeros({msk.size(0), msk.size(1)}, torch::kInt64);
       msk_i_plus_1.index_put_({msk_index[0], msk_index[1]}, 1);
-      msk_i_plus_1 = fill_voids(msk_i_plus_1);
+      std::vector<int64_t> msk_i_plus_1_vec;
+      msk_i_plus_1_vec.assign(msk_i_plus_1.data_ptr<int64_t>(), msk_i_plus_1.data_ptr<int64_t>() + msk_i_plus_1.numel());
+      size_t fill_ct = fill_voids::binary_fill_holes<int64_t>(&msk_i_plus_1_vec[0], msk.size(1), msk.size(0));
+      msk_i_plus_1 = torch::from_blob(msk_i_plus_1_vec.data(), {msk.size(0), msk.size(1)}, torch::kInt64);
       msk_index = torch::where(msk_i_plus_1 > 0);
       msk.index_put_({msk_index[0], msk_index[1]}, j + 1);
       j++;
