@@ -67,6 +67,7 @@ bool Cyto3::loadModel(const std::string& encoderPath, int threadsNumber, std::st
     sessionEncoder = std::make_unique<Ort::Session>(env, encoderPath.c_str(), sessionOptions[0]);
     inputShapeEncoder = sessionEncoder->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
   }catch(Ort::Exception& e){
+    std::cout << e.what() << std::endl;
     loadingEnd();
     return false;
   }
@@ -195,6 +196,53 @@ torch::Tensor Cyto3::changeFlowThreshold(float flow_threshold, int min_size){
   torch::Tensor mask = torch::from_blob(maskVector.data(), {inputShapeEncoder[2], inputShapeEncoder[3]}, torch::kInt64);
   torch::Tensor flowErrors = torch::from_blob(flowErrorsVector.data(), {(int64_t)flowErrorsVector.size()}, torch::kFloat64);
   return postProcess(mask, flowErrors, flow_threshold, min_size);
+}
+
+bool Cyto3::preprocessImageBFloat16(const cv::Mat& image){
+  try{
+    preprocessingStart();
+    if(image.size() != cv::Size((int)inputShapeEncoder[3], (int)inputShapeEncoder[2])){
+      preprocessingEnd();
+      return false;
+    }
+    if(image.channels() != 3){
+      preprocessingEnd();
+      return false;
+    }
+    std::vector<Ort::Value> inputTensors;
+    std::vector<float> inputTensorValuesFloat;    
+    inputTensorValuesFloat.resize(inputShapeEncoder[0] * inputShapeEncoder[1] * inputShapeEncoder[2] * inputShapeEncoder[3]);
+    for(int i = 0; i < inputShapeEncoder[2]; i++){
+      for(int j = 0; j < inputShapeEncoder[3]; j++){
+        int64_t pos = i * inputShapeEncoder[3] + j;
+        int64_t size = inputShapeEncoder[2] * inputShapeEncoder[3];
+        inputTensorValuesFloat[pos + size * 0] = image.at<cv::Vec3b>(i, j)[0];
+        inputTensorValuesFloat[pos + size * 1] = image.at<cv::Vec3b>(i, j)[1];
+        inputTensorValuesFloat[pos + size * 2] = image.at<cv::Vec3b>(i, j)[2];
+      }
+    }
+    inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, inputTensorValuesFloat.data(), inputTensorValuesFloat.size(), inputShapeEncoder.data(), inputShapeEncoder.size()));
+    if(terminating){
+      preprocessingEnd();
+      return false;
+    }
+    runOptionsEncoder.UnsetTerminate();
+    std::vector<const char*> inputNames = getInputNames(sessionEncoder);
+    std::vector<const char*> outputNames = getOutputNames(sessionEncoder);
+    auto outputTensors =  sessionEncoder->Run(runOptionsEncoder, inputNames.data(), inputTensors.data(), inputTensors.size(), outputNames.data(), outputNames.size());
+    for (size_t i = 0; i < inputNames.size(); ++i) {
+      delete [] inputNames[i];
+    }
+    for (size_t i = 0; i < outputNames.size(); ++i) {
+      delete [] outputNames[i];
+    }
+    preprocessingEnd();
+    return true;
+  }catch(Ort::Exception& e){
+    std::cout << e.what() << std::endl;
+    preprocessingEnd();
+    return false;
+  }
 }
 
 std::tuple<torch::Tensor , torch::Tensor > Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size){
