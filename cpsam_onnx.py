@@ -31,34 +31,6 @@ def cache_CPSAM_model_path():
         utils.download_url_to_file(_CPSAM_MODEL_URL, cached_file, progress=True)
     return cached_file
 
-class CPSAMONNX2(nn.Module):
-
-    def __init__(self, pretrained_model="cpsam", device=None, use_bfloat16=True):
-        super(CPSAMONNX2, self).__init__()
-        self.device = device
-        self.diam_mean = 30
-        self.pretrained_model = os.path.join(MODEL_DIR, pretrained_model)
-        dtype = torch.bfloat16 if use_bfloat16 else torch.float32
-        self.net = Transformer(dtype=dtype).to(self.device)
-        if not os.path.exists(self.pretrained_model):
-            cache_CPSAM_model_path()
-        models_logger.info(f">>>> loading model {self.pretrained_model}")
-        self.net.load_model(self.pretrained_model, device=self.device)
-
-    def forward(self, img):
-        print(img.shape, img.dtype)
-        img = img.to(torch.torch.bfloat16)
-        self.net.eval()
-        with torch.no_grad():
-            y, style = self.net(img)[:2]
-        print(y.shape, y.dtype)
-        print(style.shape, style.dtype)
-        y = y.to(torch.torch.float32)
-        style = style.to(torch.torch.float32)
-        print(y.shape, y.dtype)
-        print(style.shape, style.dtype)
-        return y, style
-
 class CPSAMONNX(nn.Module):
 
     def __init__(self, pretrained_model="cpsam", device=None, use_bfloat16=True):
@@ -72,16 +44,6 @@ class CPSAMONNX(nn.Module):
             cache_CPSAM_model_path()
         models_logger.info(f">>>> loading model {self.pretrained_model}")
         self.net.load_model(self.pretrained_model, device=self.device)
-        quantize = False
-        if quantize:
-            l = [module for module in self.net.modules() if not isinstance(module, nn.Sequential)]
-            print(l)
-            torch.backends.quantized.engine = 'qnnpack'
-            model_int8 = torch.ao.quantization.quantize_dynamic(
-            self.net,  # the original model
-            {torch.nn.Linear},  # a set of layers to dynamically quantize
-            dtype=torch.qint8)  # the target dtype for quantized weights
-            model_int8.save_model("model_int8")
 
     def forward(self, img, img_size, channels, diameter, niter):
         print("--- CPSAMONNX forward", img.shape, img_size, channels, diameter, niter)
@@ -624,7 +586,7 @@ def dx_to_circ(dP, percentiles, rgb):
     return rgb
 
 def show(image_path, device):
-    model = CPSAMONNX(device=device)
+    model = CPSAMONNX(device=device, use_bfloat16=False)
     img = cv2.imread(image_path)
     img_original = img
     img_resized, img_size, channels, diameter, niter = get_inputs(img, device=device)
@@ -638,12 +600,9 @@ def show(image_path, device):
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, rgb_of_flows)
 
-def export_onnx(image_path, device, quantize):
-    export_onnx_quantize(device, quantize)
-    return
-
+def export_onnx(image_path, device):
     onnx_path = "cpsam.onnx"
-    model = CPSAMONNX(device=device)
+    model = CPSAMONNX(device=device, use_bfloat16=False)
     img = cv2.imread(image_path)
     img_resized, img_size, channels, diameter, niter = get_inputs(img, niter_default=20, device=device)
     torch.onnx.export(
@@ -664,48 +623,7 @@ def export_onnx(image_path, device, quantize):
         output_names=["mask", "flow_errors", "dP"],
     )
 
-def export_onnx_quantize(device, quantize):
-    onnx_path = "cpsam.onnx"
-    model = CPSAMONNX2(device=device)
-
-    # use_bfloat16 = True
-    # dtype = torch.bfloat16 if use_bfloat16 else torch.float32
-    # onnx_path = "cpsam.onnx"
-    # pretrained_model = os.path.join(MODEL_DIR, "cpsam")
-    # model = Transformer(dtype=dtype).to(device)
-    # model.load_model(pretrained_model, device=device)
-
-    batch_size = 1
-    dtype = torch.float32
-    dummy = torch.randn(batch_size, 3, 256, 256, dtype=dtype)
-    torch.onnx.export(
-        model,
-        (
-            dummy,
-        ),
-        onnx_path,
-        verbose=False,
-        export_params=True,
-        opset_version=16,
-        do_constant_folding=True,
-        input_names=['input'],
-        output_names=['output', 'style'])
-    if quantize is not None:
-        from onnxruntime.quantization import QuantType
-        from onnxruntime.quantization.quantize import quantize_dynamic
-        quantize_dynamic(
-            model_input=onnx_path,
-            model_output=quantize,
-            per_channel=False,
-            reduce_range=False,
-            weight_type=QuantType.QUInt8,
-            op_types_to_quantize=["MatMul"],
-        )
-
-def import_onnx(image_path, device, quantize):
-    import_onnx_quantize(device, quantize)
-    return;
-
+def import_onnx(image_path, device):
     onnx_path = "cpsam.onnx"
     print(onnxruntime.get_available_providers())
     if device.type == "cpu":
@@ -761,54 +679,6 @@ def import_onnx(image_path, device, quantize):
     mask = post_process(mask, flow_errors, flow_threshold, min_size)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, rgb_of_flows)
-
-def import_onnx_quantize(device, quantize):
-    # use_bfloat16 = True
-    # dtype = torch.bfloat16 if use_bfloat16 else torch.float32
-    dtype = torch.float32
-    onnx_path = "cpsam.onnx"
-    if quantize is not None:
-        onnx_path = quantize
-    print(onnxruntime.get_available_providers())
-    if device.type == "cpu":
-        providers=["CPUExecutionProvider"]
-    else:
-        providers=["TensorrtExecutionProvider", "CUDAExecutionProvider"]
-    session = onnxruntime.InferenceSession(
-        onnx_path, 
-        providers=providers
-    )
-    model_inputs = session.get_inputs()
-    input_names = [
-        model_inputs[i].name for i in range(len(model_inputs))
-    ]
-    input_shapes = [
-        model_inputs[i].shape for i in range(len(model_inputs))
-    ]
-    model_outputs = session.get_outputs()
-    output_names = [
-        model_outputs[i].name for i in range(len(model_outputs))
-    ]
-    output_shapes = [
-        model_outputs[i].shape for i in range(len(model_outputs))
-    ]
-    print(input_names)
-    print(input_shapes)
-    print(output_names)
-    print(output_shapes)
-    batch_size = 1
-    dummy = torch.randn(batch_size, 3, 256, 256, dtype=dtype)
-    start = time.perf_counter()
-    inputs = [
-        dummy.cpu().numpy(), 
-    ]
-    output, style = session.run(
-        output_names, 
-        {
-        input_names[i]: inputs[i] for i in range(len(input_names))
-        }
-    )
-    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
 
 def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     img = cv2.resize(img, (512, 512))
@@ -904,10 +774,6 @@ def remove_bad_flow_masks(mask, flow_errors, flow_threshold):
 def fill_holes_and_remove_small_masks(masks, min_size, slices):
     j = 0
     for i, slc in enumerate(slices):
-        # msk = masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1] == (i + 1)
-        # masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = 0
-        # msk[int(msk.shape[0] * 0.425):int(msk.shape[0] * 0.575), int(msk.shape[1] * 0.425):int(msk.shape[1] * 0.575)] = 0
-        # masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1][msk] = (i + 1)
         msk = masks[slc[0]:slc[1] + 1, slc[2]:slc[3] + 1] == (i + 1)
         npix = torch.sum(msk)
         if npix < min_size:
@@ -934,52 +800,19 @@ def print_mask(mask, print_more=False):
     if print_more:
         torch.set_printoptions(edgeitems=3)
 
-def showOriginal(image_path, device):
-    img = io.imread(image_path)
-    first_channel = '0' # @param ['None', 0, 1, 2, 3, 4, 5]
-    second_channel = '1' # @param ['None', 0, 1, 2, 3, 4, 5]
-    third_channel = 'None' # @param ['None', 0, 1, 2, 3, 4, 5]
-    selected_channels = []
-    for i, c in enumerate([first_channel, second_channel, third_channel]):
-      if c == 'None':
-        continue
-      if int(c) > img.shape[-1]:
-        assert False, 'invalid channel index, must have index greater or equal to the number of channels'
-      if c != 'None':
-        selected_channels.append(int(c))
-    print(selected_channels)
-    img_selected_channels = np.zeros_like(img)
-    img_selected_channels[:, :, :len(selected_channels)] = img[:, :, selected_channels]
-    print(img.shape)
-    print(img_selected_channels.shape)
-    model = models.CellposeModel()
-    start = time.perf_counter()
-    flow_threshold = 0.4
-    cellprob_threshold = 0.0
-    tile_norm_blocksize = 0
-    masks, flows, styles = model.eval(img_selected_channels, batch_size=32, flow_threshold=flow_threshold, cellprob_threshold=cellprob_threshold,
-                                      normalize={"tile_norm_blocksize": tile_norm_blocksize})
-    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
-    fig = plt.figure(figsize=(12,5))
-    plot.show_segmentation(fig, img_selected_channels, masks, flows[0])
-    plt.tight_layout()
-    plt.show()
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode",type=str,default="show",required=False,help="show/export/import")
     parser.add_argument("--image",type=str,default="../demo_images/img00.png",required=False,help="image path")
     parser.add_argument("--device",type=str,default="cpu",required=False,help="cpu or cuda:0")
-    parser.add_argument("--quantize",type=str, default=None, help="If set, quantize the model and save it with this name.")
     args = parser.parse_args()
     device = torch.device(args.device)
     if args.mode == "show":
         show(args.image, device)
-        # showOriginal(args.image, device)
     elif args.mode == "export":
-        export_onnx(args.image, device, args.quantize)
+        export_onnx(args.image, device)
     elif args.mode == "import":
-        import_onnx(args.image, device, args.quantize)
+        import_onnx(args.image, device)
 
 
 
