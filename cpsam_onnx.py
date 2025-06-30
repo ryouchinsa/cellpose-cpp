@@ -629,7 +629,6 @@ def import_onnx(image_path, device):
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
     else:
-        # providers=["CUDAExecutionProvider"]
         providers = [
             ('CUDAExecutionProvider', {
                 'device_id': 0,

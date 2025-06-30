@@ -615,12 +615,10 @@ def export_onnx(image_path, device):
 
 def import_onnx(image_path, device):
     onnx_path = "cyto3.onnx"
-    # onnx_path = "new_model.onnx"
     print(onnxruntime.get_available_providers())
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
     else:
-        # providers=["CUDAExecutionProvider"]
         providers = [
             ('CUDAExecutionProvider', {
                 'device_id': 0,
