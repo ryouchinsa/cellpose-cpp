@@ -17,7 +17,7 @@ class Cyto3 {
   Ort::MemoryInfo memoryInfo{Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)};
   std::vector<int64_t> inputShapeEncoder;
   std::vector<int64_t> maskVector;
-  std::vector<double> flowErrorsVector;
+  std::vector<float> flowErrorsVector;
   bool loadingModel = false;
   bool preprocessing = false;
   bool terminating = false;
