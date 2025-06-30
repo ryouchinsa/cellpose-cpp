@@ -63,6 +63,7 @@ bool Cyto3::loadModel(const std::string& encoderPath, int threadsNumber, std::st
         options.device_id = gpuDeviceId;
 
         options.gpu_mem_limit = 2 * 1024 * 1024 * 1024;
+        options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchDefault;
 
         option.AppendExecutionProvider_CUDA(options);
       }
