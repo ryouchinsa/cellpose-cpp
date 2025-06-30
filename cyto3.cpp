@@ -61,6 +61,9 @@ bool Cyto3::loadModel(const std::string& encoderPath, int threadsNumber, std::st
         int gpuDeviceId = std::stoi(device.substr(5));
         OrtCUDAProviderOptions options;
         options.device_id = gpuDeviceId;
+
+        options.gpu_mem_limit = 2 * 1024 * 1024 * 1024;
+
         option.AppendExecutionProvider_CUDA(options);
       }
     }

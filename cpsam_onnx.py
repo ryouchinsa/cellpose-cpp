@@ -629,7 +629,17 @@ def import_onnx(image_path, device):
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
     else:
-        providers=["CUDAExecutionProvider"]
+        # providers=["CUDAExecutionProvider"]
+        providers = [
+            ('TensorrtExecutionProvider', {
+                'device_id': 0,                       # Select GPU to execute
+                'trt_max_workspace_size': 2147483648, # Set GPU memory usage limit
+            }),
+            ('CUDAExecutionProvider', {
+                'device_id': 0,
+                'gpu_mem_limit': 2 * 1024 * 1024 * 1024,
+            })
+        ]
     session = onnxruntime.InferenceSession(
         onnx_path, 
         providers=providers
