@@ -61,10 +61,7 @@ bool Cyto3::loadModel(const std::string& encoderPath, int threadsNumber, std::st
         int gpuDeviceId = std::stoi(device.substr(5));
         OrtCUDAProviderOptions options;
         options.device_id = gpuDeviceId;
-
-        options.gpu_mem_limit = 2 * 1024 * 1024 * 1024;
-        options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchDefault;
-
+        options.arena_extend_strategy = 1;
         option.AppendExecutionProvider_CUDA(options);
       }
     }
@@ -198,55 +195,8 @@ torch::Tensor postProcess(torch::Tensor mask, torch::Tensor flowErrors, float fl
 
 torch::Tensor Cyto3::changeFlowThreshold(float flow_threshold, int min_size){
   torch::Tensor mask = torch::from_blob(maskVector.data(), {inputShapeEncoder[2], inputShapeEncoder[3]}, torch::kInt64);
-  torch::Tensor flowErrors = torch::from_blob(flowErrorsVector.data(), {(int64_t)flowErrorsVector.size()}, torch::kFloat64);
+  torch::Tensor flowErrors = torch::from_blob(flowErrorsVector.data(), {(int64_t)flowErrorsVector.size()}, torch::kFloat32);
   return postProcess(mask, flowErrors, flow_threshold, min_size);
-}
-
-bool Cyto3::preprocessImageBFloat16(const cv::Mat& image){
-  try{
-    preprocessingStart();
-    if(image.size() != cv::Size((int)inputShapeEncoder[3], (int)inputShapeEncoder[2])){
-      preprocessingEnd();
-      return false;
-    }
-    if(image.channels() != 3){
-      preprocessingEnd();
-      return false;
-    }
-    std::vector<Ort::Value> inputTensors;
-    std::vector<float> inputTensorValuesFloat;    
-    inputTensorValuesFloat.resize(inputShapeEncoder[0] * inputShapeEncoder[1] * inputShapeEncoder[2] * inputShapeEncoder[3]);
-    for(int i = 0; i < inputShapeEncoder[2]; i++){
-      for(int j = 0; j < inputShapeEncoder[3]; j++){
-        int64_t pos = i * inputShapeEncoder[3] + j;
-        int64_t size = inputShapeEncoder[2] * inputShapeEncoder[3];
-        inputTensorValuesFloat[pos + size * 0] = image.at<cv::Vec3b>(i, j)[0];
-        inputTensorValuesFloat[pos + size * 1] = image.at<cv::Vec3b>(i, j)[1];
-        inputTensorValuesFloat[pos + size * 2] = image.at<cv::Vec3b>(i, j)[2];
-      }
-    }
-    inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, inputTensorValuesFloat.data(), inputTensorValuesFloat.size(), inputShapeEncoder.data(), inputShapeEncoder.size()));
-    if(terminating){
-      preprocessingEnd();
-      return false;
-    }
-    runOptionsEncoder.UnsetTerminate();
-    std::vector<const char*> inputNames = getInputNames(sessionEncoder);
-    std::vector<const char*> outputNames = getOutputNames(sessionEncoder);
-    auto outputTensors =  sessionEncoder->Run(runOptionsEncoder, inputNames.data(), inputTensors.data(), inputTensors.size(), outputNames.data(), outputNames.size());
-    for (size_t i = 0; i < inputNames.size(); ++i) {
-      delete [] inputNames[i];
-    }
-    for (size_t i = 0; i < outputNames.size(); ++i) {
-      delete [] outputNames[i];
-    }
-    preprocessingEnd();
-    return true;
-  }catch(Ort::Exception& e){
-    std::cout << e.what() << std::endl;
-    preprocessingEnd();
-    return false;
-  }
 }
 
 std::tuple<torch::Tensor , torch::Tensor > Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size){
@@ -310,12 +260,12 @@ std::tuple<torch::Tensor , torch::Tensor > Cyto3::preprocessImage(const cv::Mat&
     torch::Tensor mask = torch::from_blob(maskValues, {maskShape[0], maskShape[1]}, torch::kInt64);
     maskVector.assign(mask.data_ptr<int64_t>(), mask.data_ptr<int64_t>() + mask.numel());
 
-    auto flowErrorsValues = outputTensors[1].GetTensorMutableData<double>();
+    auto flowErrorsValues = outputTensors[1].GetTensorMutableData<float>();
     auto flowErrorsShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
-    torch::Tensor flowErrors = torch::from_blob(flowErrorsValues, {flowErrorsShape[0]}, torch::kFloat64);
-    flowErrorsVector.assign(flowErrors.data_ptr<double>(), flowErrors.data_ptr<double>() + flowErrors.numel());
+    torch::Tensor flowErrors = torch::from_blob(flowErrorsValues, {flowErrorsShape[0]}, torch::kFloat32);
+    flowErrorsVector.assign(flowErrors.data_ptr<float>(), flowErrors.data_ptr<float>() + flowErrors.numel());
 
-    auto rgbOfFlowsValues = outputTensors[2].GetTensorMutableData<double>();
+    auto rgbOfFlowsValues = outputTensors[2].GetTensorMutableData<float>();
     auto rgbOfFlowsShape = outputTensors[2].GetTensorTypeAndShapeInfo().GetShape();
     torch::Tensor rgbOfFlows = torch::from_blob(rgbOfFlowsValues, {rgbOfFlowsShape[0], rgbOfFlowsShape[1], rgbOfFlowsShape[2]}, torch::kU8);
 

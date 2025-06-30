@@ -622,14 +622,9 @@ def import_onnx(image_path, device):
     else:
         # providers=["CUDAExecutionProvider"]
         providers = [
-            ('TensorrtExecutionProvider', {
-                'device_id': 0,                       # Select GPU to execute
-                'trt_max_workspace_size': 2147483648, # Set GPU memory usage limit
-            }),
             ('CUDAExecutionProvider', {
                 'device_id': 0,
-                'gpu_mem_limit': 2 * 1024 * 1024 * 1024,
-                'cudnn_conv_algo_search': 'DEFAULT',
+                'arena_extend_strategy': 'kSameAsRequested',
             })
         ]
     session = onnxruntime.InferenceSession(

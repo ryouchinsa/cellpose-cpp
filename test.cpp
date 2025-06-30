@@ -30,14 +30,6 @@ int main(int argc, char** argv) {
   cv::Size imageSize = cv::Size(image.cols, image.rows);
   cv::Size inputSize = cyto3.getInputSize();
   cv::resize(image, image, inputSize);
-
-  bool success = cyto3.preprocessImageBFloat16(image);
-  if(!success){
-    std::cout<<"preprocessImageBFloat16 error"<<std::endl;
-    return 1;
-  }
-  return 0;
-
   std::vector<int64_t> channels = {1, 2};
   int diameter = 30;
   int niter = 200;

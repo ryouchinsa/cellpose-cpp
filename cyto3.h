@@ -32,7 +32,6 @@ class Cyto3 {
   void loadingEnd();
   cv::Size getInputSize();
   torch::Tensor changeFlowThreshold(float flow_threshold, int min_size);
-  bool preprocessImageBFloat16(const cv::Mat& image);
   std::tuple<torch::Tensor , torch::Tensor > preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size);
   void preprocessingStart();
   void preprocessingEnd();
