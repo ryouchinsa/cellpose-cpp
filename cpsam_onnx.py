@@ -185,12 +185,6 @@ class CPSAMONNX(nn.Module):
         for i in range(slices.shape[0]):
             ya[slices[i][0]:slices[i][1]], stylea[slices[i][0]:slices[i][1]] = net_forward(net, IMGa[slices[i][0]:slices[i][1]])
 
-        # np.save('ya', ya.detach().cpu().numpy())
-        # np.save('stylea', stylea.detach().cpu().numpy())
-
-        # ya = torch.from_numpy(np.load('ya.npy'))
-        # stylea = torch.from_numpy(np.load('stylea.npy'))
-
         Navg = torch.zeros((img_size_pad[1], img_size_pad[0]), dtype=net.dtype, device=self.device)
         yfi = torch.zeros((ya.shape[1], img_size_pad[1], img_size_pad[0]), dtype=net.dtype, device=self.device)
         print(yfi.shape)
