@@ -60,8 +60,10 @@ cmake --build build
 ./build/cyto3_cpp_test -encoder="../cellpose4/cpsam.onnx" -image="../demo_images/img00.png" -device="cuda:0"
 ```
 
+Running time for demo_images/img00.png.
+
 | Model | Size | Time on Apple M1 | Time on g4dn.xlarge |
 | :---: | :---: | :---: | :---: |
-| cyto3.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx.zip)) | 27.5MB | 5s | 2s |
+| cyto3.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx.zip)) | 27.5MB | 10s | 3s |
 | cpsam.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cpsam.onnx.zip)) | 1.22GB | 40s | 5s |
 
