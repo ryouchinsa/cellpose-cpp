@@ -629,6 +629,7 @@ def import_onnx(image_path, device):
             ('CUDAExecutionProvider', {
                 'device_id': 0,
                 'gpu_mem_limit': 2 * 1024 * 1024 * 1024,
+                'cudnn_conv_algo_search': 'DEFAULT',
             })
         ]
     session = onnxruntime.InferenceSession(
