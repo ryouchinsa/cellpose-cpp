@@ -30,7 +30,10 @@ class Cyto3ONNX(nn.Module):
 
     def forward(self, img, img_size, channels, diameter, niter):
         print("--- Cyto3ONNX forward", img.shape, img_size, channels, diameter, niter)
-        img = set_img_channels(img, channels)
+        img = torch.permute(img, (0, 2, 3, 1))
+        print(img.shape)
+        img = img[:, :, :, channels]
+        print(img.shape)
         img = img.squeeze()
         img = torch.permute(img, (2, 0, 1))
         percentiles = torch.zeros((2), dtype=torch.long, device=self.device)
@@ -334,28 +337,6 @@ class Cyto3ONNX(nn.Module):
         mu0[:, yx[0] - 1, yx[1] - 1] = mu
         return mu0
 
-@torch.jit.script
-def set_img_channels(img, channels):
-    img = torch.permute(img, (0, 2, 3, 1))
-    print(img.shape)
-    if torch.min(channels) > 0:
-        img = img[:, :, :, channels - 1]
-    elif channels[0] > 0:
-        channels_tmp = channels.clone()
-        channels_tmp[1] = channels_tmp[0]
-        img = img[:, :, :, channels_tmp - 1]
-        img[:, :, :, 1] = 0
-    elif channels[1] > 0:
-        channels_tmp = channels.clone()
-        channels_tmp[0] = channels_tmp[1]
-        img = img[:, :, :, channels_tmp - 1]
-        img[:, :, :, 0] = 0
-    else:
-        img = img[:, :, :, [0, 0]]
-        img[:, :, :, 1] = 0
-    print(img.shape)
-    return img
-
 def normalize99(img, percentiles):
     input = torch.flatten(img)
     in_sorted, in_argsort = torch.sort(input, dim=0)
@@ -603,7 +584,7 @@ def export_onnx(image_path, device):
         opset_version=17,
         do_constant_folding=True,
         input_names=["img",  "img_size", "channels", "diameter", "niter"],
-        output_names=["mask", "flow_errors"],
+        output_names=["mask", "flow_errors", "dP"],
     )
 
 def import_onnx(image_path, device):
@@ -682,7 +663,7 @@ def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     print(img.shape)
     img_size = torch.tensor([img.shape[2], img.shape[3]], dtype=torch.long)
     print(img_size)
-    channels = torch.tensor([2, 0], dtype=torch.long)
+    channels = torch.tensor([1, 0], dtype=torch.long)
     print("channels", channels)
     diameter = torch.tensor([30], dtype=torch.long)
     print("diameter", diameter)
@@ -807,13 +788,6 @@ if __name__ == "__main__":
         export_onnx(args.image, device)
     elif args.mode == "import":
         import_onnx(args.image, device)
-
-
-
-
-
-
-
 
 
 

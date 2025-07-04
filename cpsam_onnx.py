@@ -33,7 +33,7 @@ def cache_CPSAM_model_path():
 
 class CPSAMONNX(nn.Module):
 
-    def __init__(self, pretrained_model="cpsam", device=None, use_bfloat16=True):
+    def __init__(self, pretrained_model="cpsam", device=None, use_bfloat16=False):
         super(CPSAMONNX, self).__init__()
         self.device = device
         self.diam_mean = 30
@@ -47,7 +47,12 @@ class CPSAMONNX(nn.Module):
 
     def forward(self, img, img_size, channels, diameter, niter):
         print("--- CPSAMONNX forward", img.shape, img_size, channels, diameter, niter)
-        img = set_img_channels(img, channels)
+        img = torch.permute(img, (0, 2, 3, 1))
+        print(img.shape)
+        img_selected_channels = torch.zeros_like(img)
+        img_selected_channels[:, :, :, :channels.shape[0]] = img[:, :, :, channels]
+        img = img_selected_channels.clone()
+        print(img.shape)
         img = img.squeeze()
         img = torch.permute(img, (2, 0, 1))
         percentiles = torch.zeros((2), dtype=torch.long, device=self.device)
@@ -61,8 +66,7 @@ class CPSAMONNX(nn.Module):
         print("--- _run_net begin")
         bsize = 256
         tile_overlap = 0.1
-        batch_size = 8
-        yf, styles = self.run_net(self.net, img, img_size, bsize, tile_overlap, batch_size, diameter)
+        yf, styles = self.run_net(self.net, img, img_size, bsize, tile_overlap, diameter)
         yf = torch.nn.functional.interpolate(
             yf,
             size=(img_size[1], img_size[0]),
@@ -85,8 +89,8 @@ class CPSAMONNX(nn.Module):
         print(dP.shape)
         print(cellprob.shape)
         cellprob_threshold = 0.0
-        inds = torch.nonzero(cellprob > cellprob_threshold)
-        inds = torch.transpose(inds, 0, 1)
+        cellprob_bool = cellprob > cellprob_threshold
+        inds = get_inds(cellprob_bool)
         print(inds.shape)
         print(inds)
         p_final = self.follow_flows(dP * (cellprob > cellprob_threshold) / 5., inds, img_size, niter)
@@ -110,7 +114,7 @@ class CPSAMONNX(nn.Module):
         rgb_of_flows = dx_to_circ(dP, percentiles, rgb_of_flows)
         return mask, flow_errors, rgb_of_flows
 
-    def run_net(self, net, imgi, img_size, bsize, tile_overlap, batch_size, diameter):
+    def run_net(self, net, imgi, img_size, bsize, tile_overlap, diameter):
         nout = net.nout
         Lz, Ly0, Lx0, nchan = imgi.shape 
         img_size_resize = img_size * self.diam_mean // diameter
@@ -176,15 +180,7 @@ class CPSAMONNX(nn.Module):
         stylea = torch.zeros((nyx[0] * nyx[1], 256), dtype=net.dtype, device=self.device)        
         print(ya.shape)
         print(stylea.shape)
-        
-        slices_size = torch.zeros(1, dtype=torch.long, device=self.device)
-        slices_size = get_slices_size(IMGa, batch_size, slices_size)
-        slices = torch.zeros((slices_size[0], 2), dtype=torch.long, device=self.device)
-        slices = get_batch_slices(IMGa, batch_size, slices)
-        print(slices)
-        for i in range(slices.shape[0]):
-            ya[slices[i][0]:slices[i][1]], stylea[slices[i][0]:slices[i][1]] = net_forward(net, IMGa[slices[i][0]:slices[i][1]])
-
+        ya, stylea = net_forward(net, IMGa)
         Navg = torch.zeros((img_size_pad[1], img_size_pad[0]), dtype=net.dtype, device=self.device)
         yfi = torch.zeros((ya.shape[1], img_size_pad[1], img_size_pad[0]), dtype=net.dtype, device=self.device)
         print(yfi.shape)
@@ -330,6 +326,7 @@ class CPSAMONNX(nn.Module):
     def masks_to_flows(self, masks):
         Ly0, Lx0 = masks.shape
         Ly, Lx = Ly0 + 2, Lx0 + 2
+        masks = get_masks_if_max_0(masks)
         masks_padded = torch.nn.functional.pad(masks, (1, 1, 1, 1))
         shape = masks_padded.shape
         yx = torch.nonzero(masks_padded).t()
@@ -357,15 +354,6 @@ class CPSAMONNX(nn.Module):
         mu0 = torch.zeros((2, Ly0, Lx0), dtype=torch.float32, device=self.device)
         mu0[:, yx[0] - 1, yx[1] - 1] = mu
         return mu0
-
-@torch.jit.script
-def set_img_channels(img, channels):
-    img = torch.permute(img, (0, 2, 3, 1))
-    print(img.shape)
-    img_selected_channels = torch.zeros_like(img)
-    img_selected_channels[:, :, :, :channels.shape[0]] = img[:, :, :, channels]
-    print(img_selected_channels.shape)
-    return img_selected_channels
 
 def normalize99(img, percentiles):
     input = torch.flatten(img)
@@ -408,26 +396,6 @@ def set_imgb_to_IMG(imgb, ystart, xstart, lyx, ysub, xsub, IMG):
             IMG[j, i] = imgb[0, :, y0:y1, x0:x1]
     return IMG
 
-@torch.jit.script
-def get_slices_size(IMGa, batch_size: int, slices_size):
-    total_size = IMGa.shape[0]
-    size = int(total_size / batch_size)
-    if(total_size % batch_size != 0):
-        size += 1
-    slices_size[0] = size
-    return slices_size
-
-@torch.jit.script
-def get_batch_slices(IMGa, batch_size: int, slices):
-    total_size = IMGa.shape[0]
-    for i in range(slices.shape[0]):
-        slices[i, 0] = i * batch_size
-        if i < slices.shape[0] - 1:
-            slices[i, 1] = (i + 1) * batch_size
-        else:
-            slices[i, 1] = total_size
-    return slices
-
 def net_forward(net, x):
     print("--- net_forward")
     print(x.shape)
@@ -444,6 +412,22 @@ def set_yfi_Navg(ya, mask, ysub, xsub, yfi, Navg):
         yfi[:, ysub[j][0]:ysub[j][1], xsub[j][0]:xsub[j][1]] += ya[j] * mask
         Navg[ysub[j][0]:ysub[j][1], xsub[j][0]:xsub[j][1]] += mask   
     return yfi, Navg
+
+@torch.jit.script
+def get_inds(cellprob_bool):
+    inds = torch.nonzero(cellprob_bool)
+    inds = torch.transpose(inds, 0, 1)
+    if inds.shape[1] == 0:
+        cellprob_bool[0:2, 0:2] = True
+        inds = torch.nonzero(cellprob_bool)
+        inds = torch.transpose(inds, 0, 1)
+    return inds
+
+@torch.jit.script
+def get_masks_if_max_0(masks):
+    if torch.max(masks) == 0:
+        masks[0:2, 0:2] = 1
+    return masks
 
 @torch.jit.script
 def set_pt(im, niter, ndim: int, pt):
@@ -543,10 +527,14 @@ def set_find_objects(masks, centers, ext):
 
 @torch.jit.script
 def set_extend_centers(neighbors, isneighbor, meds, ext, T):
-    niter = 2 * torch.max(ext)
+    if ext.numel() == 0:
+        niter = 0
+    else:
+        niter = 2 * torch.max(ext)
+        niter = int(niter)
     meds0 = meds.t()[0]
     meds1 = meds.t()[1]
-    for i in range(int(niter)):
+    for i in range(niter):
         T[meds0, meds1] += 1
         Tneigh = T[neighbors[0], neighbors[1]]
         Tneigh *= isneighbor
@@ -580,8 +568,8 @@ def dx_to_circ(dP, percentiles, rgb):
     return rgb
 
 def show(image_path, device):
-    model = CPSAMONNX(device=device, use_bfloat16=False)
-    img = cv2.imread(image_path)
+    model = CPSAMONNX(device=device)
+    img = imread(image_path)
     img_original = img
     img_resized, img_size, channels, diameter, niter = get_inputs(img, device=device)
     start = time.perf_counter()
@@ -596,8 +584,8 @@ def show(image_path, device):
 
 def export_onnx(image_path, device):
     onnx_path = "cpsam.onnx"
-    model = CPSAMONNX(device=device, use_bfloat16=False)
-    img = cv2.imread(image_path)
+    model = CPSAMONNX(device=device)
+    img = imread(image_path)
     img_resized, img_size, channels, diameter, niter = get_inputs(img, niter_default=20, device=device)
     torch.onnx.export(
         model,
@@ -651,7 +639,7 @@ def import_onnx(image_path, device):
     print(input_shapes)
     print(output_names)
     print(output_shapes)
-    img = cv2.imread(image_path)
+    img = imread(image_path)
     img_original = img
     img_resized, img_size, channels, diameter, niter = get_inputs(img, device=device)
     start = time.perf_counter()
@@ -679,6 +667,11 @@ def import_onnx(image_path, device):
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, rgb_of_flows)
 
+def imread(image_path):
+    img = cv2.imread(image_path)
+    img = img[..., [2, 1, 0]]
+    return img
+
 def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     img = cv2.resize(img, (512, 512))
     print(img.shape)
@@ -688,7 +681,7 @@ def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     print(img.shape)
     img_size = torch.tensor([img.shape[2], img.shape[3]], dtype=torch.long)
     print(img_size)
-    channels = torch.tensor([0, 1], dtype=torch.long)
+    channels = torch.tensor([1, 0], dtype=torch.long)
     print("channels", channels)
     diameter = torch.tensor([30], dtype=torch.long)
     print("diameter", diameter)
@@ -751,8 +744,8 @@ def save_mask(mask):
 
 def post_process(mask, flow_errors, flow_threshold, min_size):
     print("--- post_process begin")
-    print_mask(mask)
     print_mask(flow_errors, print_more=True)
+    print_mask(mask)
     mask = remove_bad_flow_masks(mask, flow_errors, flow_threshold)
     labels_num = torch.max(mask)
     slices = torch.zeros((labels_num, 4), dtype=torch.long)
@@ -787,7 +780,8 @@ def fill_holes_and_remove_small_masks(masks, min_size, slices):
 
 def print_mask(mask, print_more=False):
     print(mask.dtype)
-    print(mask.max())
+    if mask.numel() != 0:
+        print(mask.max())
     print(mask.shape)
     print(mask)
     if mask.shape == mask[mask > 0].shape:
