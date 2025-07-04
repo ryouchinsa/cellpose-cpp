@@ -27,10 +27,11 @@ int main(int argc, char** argv) {
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   std::cout<<"preprocessImage started"<<std::endl;
   cv::Mat image = cv::imread(FLAGS_image, cv::IMREAD_COLOR);
+  cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
   cv::Size imageSize = cv::Size(image.cols, image.rows);
   cv::Size inputSize = cyto3.getInputSize();
   cv::resize(image, image, inputSize);
-  std::vector<int64_t> channels = {1, 2};
+  std::vector<int64_t> channels = {1, 0};
   int diameter = 30;
   int niter = 200;
   float flow_threshold = 0.4;

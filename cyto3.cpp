@@ -210,8 +210,9 @@ std::tuple<torch::Tensor , torch::Tensor > Cyto3::preprocessImage(const cv::Mat&
       preprocessingEnd();
       return std::make_tuple(torch::zeros(0), torch::zeros(0));
     }
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     std::vector<Ort::Value> inputTensors;
-    std::vector<float> inputTensorValuesFloat;    
+    std::vector<float> inputTensorValuesFloat;
     inputTensorValuesFloat.resize(inputShapeEncoder[0] * inputShapeEncoder[1] * inputShapeEncoder[2] * inputShapeEncoder[3]);
     for(int i = 0; i < inputShapeEncoder[2]; i++){
       for(int j = 0; j < inputShapeEncoder[3]; j++){
@@ -222,6 +223,8 @@ std::tuple<torch::Tensor , torch::Tensor > Cyto3::preprocessImage(const cv::Mat&
         inputTensorValuesFloat[pos + size * 2] = image.at<cv::Vec3b>(i, j)[2];
       }
     }
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
     inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, inputTensorValuesFloat.data(), inputTensorValuesFloat.size(), inputShapeEncoder.data(), inputShapeEncoder.size()));
     
     std::vector<int64_t> orig_im_size_values_int64 = {imageSize.height, imageSize.width};
