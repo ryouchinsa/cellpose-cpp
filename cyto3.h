@@ -5,7 +5,6 @@
 #include <fstream>
 #include <iostream>
 #include <opencv2/core.hpp>
-#include <torch/torch.h>
 #include <onnxruntime_cxx_api.h>
 #include "fill_voids.hpp"
 
@@ -16,7 +15,7 @@ class Cyto3 {
   Ort::RunOptions runOptionsEncoder;
   Ort::MemoryInfo memoryInfo{Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)};
   std::vector<int64_t> inputShapeEncoder;
-  std::vector<int64_t> maskVector;
+  std::vector<unsigned short> maskVector;
   std::vector<float> flowErrorsVector;
   bool loadingModel = false;
   bool preprocessing = false;
@@ -31,13 +30,12 @@ class Cyto3 {
   void loadingStart();
   void loadingEnd();
   cv::Size getInputSize();
-  torch::Tensor changeFlowThreshold(float flow_threshold, int min_size);
-  std::tuple<torch::Tensor , torch::Tensor > preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size);
+  cv::Mat changeFlowThreshold(float flow_threshold, int min_size);
+  std::tuple<cv::Mat, cv::Mat> preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size);
   void preprocessingStart();
   void preprocessingEnd();
 };
 
-void saveOutputMask(torch::Tensor mask, cv::Size imageSize, float flow_threshold, int min_size);
-void saveRGBOfFlows(torch::Tensor rgbOfFlows, cv::Size imageSize);
+void saveOutputMask(cv::Mat mask, cv::Size imageSize, float flow_threshold, int min_size);
 
 #endif

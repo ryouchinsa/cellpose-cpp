@@ -1,6 +1,5 @@
 #include "cyto3.h"
 #include <opencv2/opencv.hpp>
-using namespace torch::indexing;
 
 Cyto3::Cyto3(){}
 Cyto3::~Cyto3(){
@@ -31,7 +30,7 @@ void Cyto3::terminatePreprocessing(){
   terminating = true;
 }
 
-bool modelExists(const std::string& modelPath){
+bool modelExistsCP(const std::string& modelPath){
   std::ifstream f(modelPath);
   if (!f.good()) {
     return false;
@@ -46,7 +45,7 @@ bool Cyto3::loadModel(const std::string& encoderPath, int threadsNumber, std::st
       loadingEnd();
       return false;
     }
-    if(!modelExists(encoderPath)){
+    if(!modelExistsCP(encoderPath)){
       loadingEnd();
       return false;
     }
@@ -93,7 +92,7 @@ cv::Size Cyto3::getInputSize(){
   return cv::Size((int)inputShapeEncoder[3], (int)inputShapeEncoder[2]);
 }
 
-std::vector<const char*> getInputNames(std::unique_ptr<Ort::Session> &session){
+std::vector<const char*> getInputNamesCP(std::unique_ptr<Ort::Session> &session){
   std::vector<const char*> inputNames;
   Ort::AllocatorWithDefaultOptions allocator;
   for (size_t i = 0; i < session->GetInputCount(); ++i) {
@@ -107,7 +106,7 @@ std::vector<const char*> getInputNames(std::unique_ptr<Ort::Session> &session){
   return inputNames;
 }
 
-std::vector<const char*> getOutputNames(std::unique_ptr<Ort::Session> &session){
+std::vector<const char*> getOutputNamesCP(std::unique_ptr<Ort::Session> &session){
   std::vector<const char*> outputNames;
   Ort::AllocatorWithDefaultOptions allocator;
   for (size_t i = 0; i < session->GetOutputCount(); ++i) {
@@ -121,94 +120,64 @@ std::vector<const char*> getOutputNames(std::unique_ptr<Ort::Session> &session){
   return outputNames;
 }
 
-int getLabelsNum(torch::Tensor mask){
-  auto m = torch::max(mask);
-  int labels_num = m.item<int>();
-  return labels_num;
-}
-
-torch::Tensor findObjects(torch::Tensor mask){
-  int labels_num = getLabelsNum(mask);
-  auto slices = torch::zeros({labels_num, 4}, torch::kInt);
-  for (int i = 1; i < labels_num + 1; i++) {
-    auto mask_i = torch::where(mask == i);
-    auto ymin = torch::min(mask_i[0]);
-    auto ymax = torch::max(mask_i[0]);
-    auto xmin = torch::min(mask_i[1]);
-    auto xmax = torch::max(mask_i[1]);
-    slices[i - 1][0] = ymin;
-    slices[i - 1][1] = ymax;
-    slices[i - 1][2] = xmin;
-    slices[i - 1][3] = xmax;
-  }
-  return slices;
-}
-
-torch::Tensor removeBadFlowMasks(torch::Tensor mask, torch::Tensor flowErrors, float flow_threshold){
-  auto flowErrors_index = torch::where(flowErrors > flow_threshold);
-  for (int i = 0; i < flowErrors_index[0].size(0); i++) {
-    int label = flowErrors_index[0][i].item<int>() + 1;
-    auto mask_index = torch::where(mask == label);
-    mask.index_put_({mask_index[0], mask_index[1]}, 0);
-  }
-  auto tensors = at::_unique(mask, true, true);
-  auto inverse_indices = std::get<1>(tensors);
-  return inverse_indices;
-}
-
-void fillHolesAndRemoveSmallMasks(torch::Tensor mask, int min_size){
-  auto slices = findObjects(mask);
-  int j = 0;
-  int labels_num = getLabelsNum(mask);
-  for (int i = 0; i < labels_num; i++) {
-    int ymin = slices[i][0].item<int>();
-    int ymax = slices[i][1].item<int>() + 1;
-    int xmin = slices[i][2].item<int>();
-    int xmax = slices[i][3].item<int>() + 1;
-    auto msk = mask.index({Slice(ymin, ymax), Slice(xmin, xmax)});
-    // msk.index_put_({Slice(msk.size(0) * 0.425, msk.size(0) * 0.575), Slice(msk.size(1) * 0.425, msk.size(1) * 0.575)}, 0);
-    auto msk_index = torch::where(msk == (i + 1));
-    int npix = msk_index[0].size(0);
-    if(npix < min_size){
-      msk.index_put_({msk_index[0], msk_index[1]}, 0);
-    }else{
-      auto msk_i_plus_1 = torch::zeros({msk.size(0), msk.size(1)}, torch::kInt64);
-      msk_i_plus_1.index_put_({msk_index[0], msk_index[1]}, 1);
-      std::vector<int64_t> msk_i_plus_1_vec;
-      msk_i_plus_1_vec.assign(msk_i_plus_1.data_ptr<int64_t>(), msk_i_plus_1.data_ptr<int64_t>() + msk_i_plus_1.numel());
-      size_t fill_ct = fill_voids::binary_fill_holes<int64_t>(&msk_i_plus_1_vec[0], msk.size(1), msk.size(0));
-      msk_i_plus_1 = torch::from_blob(msk_i_plus_1_vec.data(), {msk.size(0), msk.size(1)}, torch::kInt64);
-      msk_index = torch::where(msk_i_plus_1 > 0);
-      msk.index_put_({msk_index[0], msk_index[1]}, j + 1);
-      j++;
+cv::Mat Cyto3::changeFlowThreshold(float flow_threshold, int min_size){
+  std::vector<unsigned short> maskVectorCopy(maskVector);
+  cv::Mat mask = cv::Mat((int)inputShapeEncoder[2], (int)inputShapeEncoder[3], CV_16U, maskVectorCopy.data());
+  int label = 0;
+  for (size_t k = 0; k < flowErrorsVector.size(); k++) {
+    if(flowErrorsVector[k] > flow_threshold){
+//      std::cout<<k<<" flowErrorsVector "<<flowErrorsVector[k]<<std::endl;
+      mask.setTo(0, mask == (k + 1));
+      continue;
     }
-    mask.index_put_({Slice(ymin, ymax), Slice(xmin, xmax)}, msk);
+    cv::Mat maskk = cv::Mat((int)inputShapeEncoder[2], (int)inputShapeEncoder[3], CV_16U, cv::Scalar(0));
+    maskk.setTo(1, mask == (k + 1));
+    cv::Mat Points;
+    cv::findNonZero(maskk, Points);
+    if(!Points.data){
+      continue;
+    }
+    cv::Rect Min_Rect = cv::boundingRect(Points);
+    cv::Mat roi_tmp = maskk(Min_Rect);
+    cv::Mat roi = roi_tmp.clone();
+    int npix = (int)Points.total();
+    if(npix < min_size){
+      std::cout<<k<<" npix "<<npix<<std::endl;
+      mask.setTo(0, mask == (k + 1));
+      continue;
+    }
+    size_t fill_ct = fill_voids::binary_fill_holes<unsigned short>((unsigned short *)roi.data, roi.cols, roi.rows);
+    if(fill_ct > 0){
+//      std::cout<<k<<" fill_ct "<<fill_ct<<" size "<<roi.cols<<" "<<roi.rows<<std::endl;
+    }else{
+      // mask.setTo(0, mask == (k + 1));
+      // continue;
+    }
+    for(int i = 0; i < roi.rows; i++){
+      for(int j = 0; j < roi.cols; j++){
+        unsigned short value = roi.at<unsigned short>(i, j);
+        if(value > 0){
+          mask.at<unsigned short>(i + Min_Rect.y, j + Min_Rect.x) = label + 1;
+        }
+      }
+    }
+    label++;
   }
+  return mask.clone();
 }
 
-torch::Tensor postProcess(torch::Tensor mask, torch::Tensor flowErrors, float flow_threshold, int min_size){
-  torch::set_num_threads(1);
-  mask = removeBadFlowMasks(mask, flowErrors, flow_threshold);
-  fillHolesAndRemoveSmallMasks(mask, min_size);
-  return mask;
-}
-
-torch::Tensor Cyto3::changeFlowThreshold(float flow_threshold, int min_size){
-  torch::Tensor mask = torch::from_blob(maskVector.data(), {inputShapeEncoder[2], inputShapeEncoder[3]}, torch::kInt64);
-  torch::Tensor flowErrors = torch::from_blob(flowErrorsVector.data(), {(int64_t)flowErrorsVector.size()}, torch::kFloat32);
-  return postProcess(mask, flowErrors, flow_threshold, min_size);
-}
-
-std::tuple<torch::Tensor , torch::Tensor > Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size){
+std::tuple<cv::Mat, cv::Mat> Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size){
   try{
     preprocessingStart();
     if(image.size() != cv::Size((int)inputShapeEncoder[3], (int)inputShapeEncoder[2])){
       preprocessingEnd();
-      return std::make_tuple(torch::zeros(0), torch::zeros(0));
+      cv::Mat m1, m2;
+      return std::make_tuple(m1, m2);
     }
     if(image.channels() != 3){
       preprocessingEnd();
-      return std::make_tuple(torch::zeros(0), torch::zeros(0));
+      cv::Mat m1, m2;
+      return std::make_tuple(m1, m2);
     }
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     std::vector<Ort::Value> inputTensors;
@@ -245,11 +214,12 @@ std::tuple<torch::Tensor , torch::Tensor > Cyto3::preprocessImage(const cv::Mat&
    
     if(terminating){
       preprocessingEnd();
-      return std::make_tuple(torch::zeros(0), torch::zeros(0));
+      cv::Mat m1, m2;
+      return std::make_tuple(m1, m2);
     }
     runOptionsEncoder.UnsetTerminate();
-    std::vector<const char*> inputNames = getInputNames(sessionEncoder);
-    std::vector<const char*> outputNames = getOutputNames(sessionEncoder);
+    std::vector<const char*> inputNames = getInputNamesCP(sessionEncoder);
+    std::vector<const char*> outputNames = getOutputNamesCP(sessionEncoder);
     auto outputTensors =  sessionEncoder->Run(runOptionsEncoder, inputNames.data(), inputTensors.data(), inputTensors.size(), outputNames.data(), outputNames.size());
     for (size_t i = 0; i < inputNames.size(); ++i) {
       delete [] inputNames[i];
@@ -260,25 +230,25 @@ std::tuple<torch::Tensor , torch::Tensor > Cyto3::preprocessImage(const cv::Mat&
 
     auto maskValues = outputTensors[0].GetTensorMutableData<int64_t>();
     auto maskShape = outputTensors[0].GetTensorTypeAndShapeInfo().GetShape();
-    torch::Tensor mask = torch::from_blob(maskValues, {maskShape[0], maskShape[1]}, torch::kInt64);
-    maskVector.assign(mask.data_ptr<int64_t>(), mask.data_ptr<int64_t>() + mask.numel());
+    maskVector.assign(maskValues, maskValues + maskShape[0] * maskShape[1]);
 
     auto flowErrorsValues = outputTensors[1].GetTensorMutableData<float>();
     auto flowErrorsShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
-    torch::Tensor flowErrors = torch::from_blob(flowErrorsValues, {flowErrorsShape[0]}, torch::kFloat32);
-    flowErrorsVector.assign(flowErrors.data_ptr<float>(), flowErrors.data_ptr<float>() + flowErrors.numel());
+    flowErrorsVector.assign(flowErrorsValues, flowErrorsValues + flowErrorsShape[0]);
 
     auto rgbOfFlowsValues = outputTensors[2].GetTensorMutableData<float>();
     auto rgbOfFlowsShape = outputTensors[2].GetTensorTypeAndShapeInfo().GetShape();
-    torch::Tensor rgbOfFlows = torch::from_blob(rgbOfFlowsValues, {rgbOfFlowsShape[0], rgbOfFlowsShape[1], rgbOfFlowsShape[2]}, torch::kU8);
+    cv::Mat rgbOfFlows = cv::Mat((int)rgbOfFlowsShape[0], (int)rgbOfFlowsShape[1], CV_8UC3, rgbOfFlowsValues);
 
-    mask = postProcess(mask, flowErrors, flow_threshold, min_size);
+    cv::Mat mask = changeFlowThreshold(flow_threshold, min_size);
+
     preprocessingEnd();
     return std::make_tuple(mask, rgbOfFlows);
   }catch(Ort::Exception& e){
     std::cout << e.what() << std::endl;
     preprocessingEnd();
-    return std::make_tuple(torch::zeros(0), torch::zeros(0));
+    cv::Mat m1, m2;
+    return std::make_tuple(m1, m2);
   }
 }
 
@@ -330,58 +300,26 @@ void HSVtoRGB(float& fR, float& fG, float& fB, float& fH, float& fS, float& fV) 
   fB += fM;
 }
 
-void saveOutputMask(torch::Tensor mask, cv::Size imageSize, float flow_threshold, int min_size){
-  int labels_num = getLabelsNum(mask);
+void saveOutputMask(cv::Mat mask, cv::Size imageSize, float flow_threshold, int min_size){
+  double minVal;
+  double maxVal;
+  cv::Point minLoc;
+  cv::Point maxLoc;
+  minMaxLoc(mask, &minVal, &maxVal, &minLoc, &maxLoc);
+  int labels_num = maxVal;
   std::cout<<labels_num<<std::endl;
-  torch::Tensor maskRGB = torch::zeros({mask.size(0), mask.size(1), 3}, torch::kU8);
+  cv::Mat outputMask = cv::Mat(mask.rows, mask.cols, CV_8UC3, cv::Scalar(0, 0, 0));
   for (int i = 0; i < labels_num; i++) {
-    auto msk_index = torch::where(mask == (i + 1));
     float fR = 0, fG = 0, fB = 0, fH = 0, fS = 0, fV = 0;
     fH = 360.0 * i / labels_num;
     fS = 0.5;
     fV = 0.5;
     HSVtoRGB(fR, fG, fB, fH, fS, fV);
-    maskRGB.index_put_({msk_index[0], msk_index[1], 0}, fR * 255);
-    maskRGB.index_put_({msk_index[0], msk_index[1], 1}, fG * 255);
-    maskRGB.index_put_({msk_index[0], msk_index[1], 2}, fB * 255);
+    outputMask.setTo(cv::Scalar(fR * 255, fG * 255, fB * 255), mask == (i + 1));
   }
-  cv::Mat outputMask = cv::Mat(mask.size(0), mask.size(1), CV_8UC3, maskRGB.data_ptr());
+  cv::resize(outputMask, outputMask, imageSize);
   std::stringstream ss;
   ss << std::fixed << std::setprecision(2) << flow_threshold;  
   std::string fileName = "outputMask" + ss.str() + "_" + std::to_string(min_size);
   cv::imwrite(fileName + ".png", outputMask);
-  cv::resize(outputMask, outputMask, imageSize);
-  cv::imwrite(fileName + "_original.png", outputMask);
 }
-
-void saveRGBOfFlows(torch::Tensor rgbOfFlows, cv::Size imageSize){
-  cv::Mat outputMask = cv::Mat(rgbOfFlows.size(0), rgbOfFlows.size(1), CV_8UC3, rgbOfFlows.data_ptr());
-  std::string fileName = "rgbOfFlows";
-  cv::imwrite(fileName + ".jpg", outputMask);
-  cv::resize(outputMask, outputMask, imageSize);
-  cv::imwrite(fileName + "_original.jpg", outputMask);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

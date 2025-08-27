@@ -31,18 +31,19 @@ int main(int argc, char** argv) {
   cv::Size imageSize = cv::Size(image.cols, image.rows);
   cv::Size inputSize = cyto3.getInputSize();
   cv::resize(image, image, inputSize);
-  std::vector<int64_t> channels = {1, 0};
+  std::vector<int64_t> channels = {1, 2};
   int diameter = 30;
   int niter = 200;
   float flow_threshold = 0.4;
   int min_size = 15;
   auto [mask, rgbOfFlows] = cyto3.preprocessImage(image, inputSize, channels, diameter, niter, flow_threshold, min_size);
-  if(mask.numel() == 0){
+  if(mask.total() == 0){
     std::cout<<"preprocessImage error"<<std::endl;
     return 1;
   }
   saveOutputMask(mask, imageSize, flow_threshold, min_size);
-  saveRGBOfFlows(rgbOfFlows, imageSize);
+  cv::resize(rgbOfFlows, rgbOfFlows, imageSize);
+  cv::imwrite("rgbOfFlows.jpg", rgbOfFlows);
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
 
