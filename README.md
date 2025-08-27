@@ -3,7 +3,7 @@ This code is to run a [Cellpose](https://github.com/MouseLand/cellpose) ONNX mod
 
 ![cpsam](https://github.com/user-attachments/assets/eadc58d7-492f-42d1-a55a-b51af9871ae3)
 
-Install [CUDA, cuDNN, PyTorch, LibTorch, and ONNX Runtime](https://rectlabel.com/pytorch/).
+Install [CUDA, cuDNN, PyTorch, and ONNX Runtime](https://rectlabel.com/pytorch/).
 
 Install Cellpose3 and Cellpose4.
 ```bash
@@ -48,7 +48,7 @@ Build and run.
 # macOS
 cmake -S . -B build -DONNXRUNTIME_ROOT_DIR=/Users/ryo/Downloads/onnxruntime-osx-universal2-1.20.0
 # Ubuntu GPU
-cmake -S . -B build -DONNXRUNTIME_ROOT_DIR=/root/onnxruntime-linux-x64-gpu-1.20.0 -DCMAKE_PREFIX_PATH=/root/libtorch
+cmake -S . -B build -DONNXRUNTIME_ROOT_DIR=/root/onnxruntime-linux-x64-gpu-1.20.0
 
 cmake --build build
 
