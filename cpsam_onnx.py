@@ -37,7 +37,11 @@ class CPSAMONNX(nn.Module):
         super(CPSAMONNX, self).__init__()
         self.device = device
         self.diam_mean = 30
-        self.pretrained_model = os.path.join(MODEL_DIR, pretrained_model)
+        if pretrained_model != "cpsam" and os.path.exists(pretrained_model):
+            self.pretrained_model = pretrained_model
+        else:
+            pretrained_model = "cpsam"
+            self.pretrained_model = os.path.join(MODEL_DIR, pretrained_model)
         dtype = torch.bfloat16 if use_bfloat16 else torch.float32
         self.net = Transformer(dtype=dtype).to(self.device)
         if not os.path.exists(self.pretrained_model):
@@ -582,9 +586,9 @@ def show(image_path, device):
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, rgb_of_flows)
 
-def export_onnx(image_path, device):
+def export_onnx(pretrained_model, image_path, device):
     onnx_path = "cpsam.onnx"
-    model = CPSAMONNX(device=device)
+    model = CPSAMONNX(device=device, pretrained_model=pretrained_model)
     img = imread(image_path)
     img_resized, img_size, channels, diameter, niter = get_inputs(img, niter_default=20, device=device)
     torch.onnx.export(
@@ -796,6 +800,7 @@ def print_mask(mask, print_more=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode",type=str,default="show",required=False,help="show/export/import")
+    parser.add_argument("--pretrained_model",type=str,default="cpsam",required=False,help="model path")
     parser.add_argument("--image",type=str,default="../demo_images/img00.png",required=False,help="image path")
     parser.add_argument("--device",type=str,default="cpu",required=False,help="cpu or cuda:0")
     args = parser.parse_args()
@@ -803,7 +808,7 @@ if __name__ == "__main__":
     if args.mode == "show":
         show(args.image, device)
     elif args.mode == "export":
-        export_onnx(args.image, device)
+        export_onnx(args.pretrained_model, args.image, device)
     elif args.mode == "import":
         import_onnx(args.image, device)
 
