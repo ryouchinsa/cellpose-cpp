@@ -4,7 +4,7 @@ io.logger_setup()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train_dir",type=str,default="show",required=True,help="training images directory")
+    parser.add_argument("--train_dir",type=str,default="train_dir",required=True,help="training images directory")
     parser.add_argument("--n_epochs",type=int,default=100,required=False,help="training epochs")
     parser.add_argument("--device",type=str,default="cpu",required=False,help="cpu or cuda:0")
     args = parser.parse_args()
