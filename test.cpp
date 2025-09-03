@@ -6,7 +6,7 @@
 #include "cyto3.h"
 
 DEFINE_string(encoder, "cyto3.onnx", "Path to the encoder model");
-DEFINE_string(after_run_net, "after_run_net.onnx", "Path to the after_run_net model");
+DEFINE_string(after_run_net, "", "Path to the after_run_net model");
 DEFINE_string(image, "demo_images/img00.png", "Path to the image");
 DEFINE_string(device, "cpu", "cpu or cuda:0(1,2,3...)");
 DEFINE_bool(h, false, "Show help");
@@ -18,6 +18,7 @@ int main(int argc, char** argv) {
                "-image=\"demo_images/img00.png\" -device=\"cpu\""<< std::endl;
     return 0;
   }
+  
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   Cyto3 cyto3;
   std::cout<<"loadModel started"<<std::endl;
@@ -61,27 +62,29 @@ int main(int argc, char** argv) {
   end = std::chrono::steady_clock::now();
   std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
 
-  begin = std::chrono::steady_clock::now();
-  cellprob_threshold = -1.0;
-  mask = cyto3.afterRunNet(inputSize, cellprob_threshold, niter, flow_threshold, min_size);
-  if(mask.total() == 0){
-    std::cout<<"afterRunNet error"<<std::endl;
-    return 1;
+  if(FLAGS_after_run_net.length() > 0){
+    begin = std::chrono::steady_clock::now();
+    cellprob_threshold = -1.0;
+    mask = cyto3.afterRunNet(inputSize, cellprob_threshold, niter, flow_threshold, min_size);
+    if(mask.total() == 0){
+      std::cout<<"afterRunNet error"<<std::endl;
+      return 1;
+    }
+    saveOutputMask(mask, imageSize, cellprob_threshold, flow_threshold, min_size);
+    end = std::chrono::steady_clock::now();
+    std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
+    
+    begin = std::chrono::steady_clock::now();
+    cellprob_threshold = -2.0;
+    mask = cyto3.afterRunNet(inputSize, cellprob_threshold, niter, flow_threshold, min_size);
+    if(mask.total() == 0){
+      std::cout<<"afterRunNet error"<<std::endl;
+      return 1;
+    }
+    saveOutputMask(mask, imageSize, cellprob_threshold, flow_threshold, min_size);
+    end = std::chrono::steady_clock::now();
+    std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
   }
-  saveOutputMask(mask, imageSize, cellprob_threshold, flow_threshold, min_size);
-  end = std::chrono::steady_clock::now();
-  std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
-  
-  begin = std::chrono::steady_clock::now();
-  cellprob_threshold = -2.0;
-  mask = cyto3.afterRunNet(inputSize, cellprob_threshold, niter, flow_threshold, min_size);
-  if(mask.total() == 0){
-    std::cout<<"afterRunNet error"<<std::endl;
-    return 1;
-  }
-  saveOutputMask(mask, imageSize, cellprob_threshold, flow_threshold, min_size);
-  end = std::chrono::steady_clock::now();
-  std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
   
   return 0;
 }

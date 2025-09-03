@@ -66,7 +66,9 @@ bool Cyto3::loadModel(const std::string& encoderPath, const std::string& afterRu
     }
     sessionEncoder = std::make_unique<Ort::Session>(env, encoderPath.c_str(), sessionOptions[0]);
     inputShapeEncoder = sessionEncoder->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
-    sessionAfterRunNet = std::make_unique<Ort::Session>(env, afterRunNetPath.c_str(), sessionOptions[0]);
+    if(afterRunNetPath.length() > 0){
+      sessionAfterRunNet = std::make_unique<Ort::Session>(env, afterRunNetPath.c_str(), sessionOptions[0]);
+    }
   }catch(Ort::Exception& e){
     std::cout << e.what() << std::endl;
     loadingEnd();
