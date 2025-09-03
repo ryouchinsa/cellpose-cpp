@@ -38,7 +38,7 @@ bool modelExistsCP(const std::string& modelPath){
   return true;
 }
 
-bool Cyto3::loadModel(const std::string& encoderPath, int threadsNumber, std::string device){
+bool Cyto3::loadModel(const std::string& encoderPath, const std::string& afterRunNetPath, int threadsNumber, std::string device){
   try{
     loadingStart();
     if(!clearLoadModel()){
@@ -66,6 +66,7 @@ bool Cyto3::loadModel(const std::string& encoderPath, int threadsNumber, std::st
     }
     sessionEncoder = std::make_unique<Ort::Session>(env, encoderPath.c_str(), sessionOptions[0]);
     inputShapeEncoder = sessionEncoder->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+    sessionAfterRunNet = std::make_unique<Ort::Session>(env, afterRunNetPath.c_str(), sessionOptions[0]);
   }catch(Ort::Exception& e){
     std::cout << e.what() << std::endl;
     loadingEnd();
@@ -166,7 +167,7 @@ cv::Mat Cyto3::changeFlowThreshold(float flow_threshold, int min_size){
   return mask.clone();
 }
 
-std::tuple<cv::Mat, cv::Mat> Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, int niter, float flow_threshold, int min_size){
+std::tuple<cv::Mat, cv::Mat> Cyto3::preprocessImage(const cv::Mat& image, const cv::Size &imageSize, const std::vector<int64_t> &channels, int diameter, float cellprob_threshold, int niter, float flow_threshold, int min_size){
   try{
     preprocessingStart();
     if(image.size() != cv::Size((int)inputShapeEncoder[3], (int)inputShapeEncoder[2])){
@@ -179,7 +180,6 @@ std::tuple<cv::Mat, cv::Mat> Cyto3::preprocessImage(const cv::Mat& image, const 
       cv::Mat m1, m2;
       return std::make_tuple(m1, m2);
     }
-    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     std::vector<Ort::Value> inputTensors;
     std::vector<float> inputTensorValuesFloat;
     inputTensorValuesFloat.resize(inputShapeEncoder[0] * inputShapeEncoder[1] * inputShapeEncoder[2] * inputShapeEncoder[3]);
@@ -192,25 +192,27 @@ std::tuple<cv::Mat, cv::Mat> Cyto3::preprocessImage(const cv::Mat& image, const 
         inputTensorValuesFloat[pos + size * 2] = image.at<cv::Vec3b>(i, j)[2];
       }
     }
-    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-    std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
     inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, inputTensorValuesFloat.data(), inputTensorValuesFloat.size(), inputShapeEncoder.data(), inputShapeEncoder.size()));
     
-    std::vector<int64_t> orig_im_size_values_int64 = {imageSize.height, imageSize.width};
+    std::vector<int64_t> orig_im_size_values = {imageSize.height, imageSize.width};
     std::vector<int64_t> origImSizeShape = {2};
-    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, orig_im_size_values_int64.data(), 2, origImSizeShape.data(), origImSizeShape.size()));
+    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, orig_im_size_values.data(), 2, origImSizeShape.data(), origImSizeShape.size()));
     
-    std::vector<int64_t> channels_values_int64 = {channels[0], channels[1]};
+    std::vector<int64_t> channels_values = {channels[0], channels[1]};
     std::vector<int64_t> channelsShape = {2};
-    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, channels_values_int64.data(), 2, channelsShape.data(), channelsShape.size()));
+    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, channels_values.data(), 2, channelsShape.data(), channelsShape.size()));
     
-    std::vector<int64_t> diameter_values_int64 = {diameter};
+    std::vector<int64_t> diameter_values = {diameter};
     std::vector<int64_t> diameterShape = {1};
-    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, diameter_values_int64.data(), 1, diameterShape.data(), diameterShape.size()));
+    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, diameter_values.data(), 1, diameterShape.data(), diameterShape.size()));
     
-    std::vector<int64_t> niter_values_int64 = {niter};
+    std::vector<float> cellprob_threshold_values = {cellprob_threshold};
+    std::vector<int64_t> cellprobThresholdShape = {1};
+    inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, cellprob_threshold_values.data(), 1, cellprobThresholdShape.data(), cellprobThresholdShape.size()));
+    
+    std::vector<int64_t> niter_values = {niter};
     std::vector<int64_t> niterShape = {1};
-    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, niter_values_int64.data(), 1, niterShape.data(), niterShape.size()));
+    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, niter_values.data(), 1, niterShape.data(), niterShape.size()));
    
     if(terminating){
       preprocessingEnd();
@@ -240,6 +242,14 @@ std::tuple<cv::Mat, cv::Mat> Cyto3::preprocessImage(const cv::Mat& image, const 
     auto rgbOfFlowsShape = outputTensors[2].GetTensorTypeAndShapeInfo().GetShape();
     cv::Mat rgbOfFlows = cv::Mat((int)rgbOfFlowsShape[0], (int)rgbOfFlowsShape[1], CV_8UC3, rgbOfFlowsValues);
 
+    auto cellProbValues = outputTensors[3].GetTensorMutableData<float>();
+    auto cellProbShape = outputTensors[3].GetTensorTypeAndShapeInfo().GetShape();
+    cellProbVector.assign(cellProbValues, cellProbValues + cellProbShape[0] * cellProbShape[1]);
+
+    auto dPValues = outputTensors[4].GetTensorMutableData<float>();
+    auto dPShape = outputTensors[4].GetTensorTypeAndShapeInfo().GetShape();
+    dPVector.assign(dPValues, dPValues + dPShape[0] * dPShape[1] * dPShape[2]);
+
     cv::Mat mask = changeFlowThreshold(flow_threshold, min_size);
 
     preprocessingEnd();
@@ -249,6 +259,65 @@ std::tuple<cv::Mat, cv::Mat> Cyto3::preprocessImage(const cv::Mat& image, const 
     preprocessingEnd();
     cv::Mat m1, m2;
     return std::make_tuple(m1, m2);
+  }
+}
+
+cv::Mat Cyto3::afterRunNet(const cv::Size &imageSize, float cellprob_threshold, int niter, float flow_threshold, int min_size){
+  try{
+    preprocessingStart();
+    std::vector<Ort::Value> inputTensors;
+
+    std::vector<int64_t> cellProbShape = {imageSize.height, imageSize.width};
+    inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, cellProbVector.data(), cellProbVector.size(), cellProbShape.data(), cellProbShape.size()));
+    
+    std::vector<int64_t> dPShape = {2, imageSize.height, imageSize.width};
+    inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, dPVector.data(), dPVector.size(), dPShape.data(), dPShape.size()));
+    
+    std::vector<int64_t> orig_im_size_values = {imageSize.height, imageSize.width};
+    std::vector<int64_t> origImSizeShape = {2};
+    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, orig_im_size_values.data(), 2, origImSizeShape.data(), origImSizeShape.size()));
+     
+    std::vector<float> cellprob_threshold_values = {cellprob_threshold};
+    std::vector<int64_t> cellprobThresholdShape = {1};
+    inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, cellprob_threshold_values.data(), 1, cellprobThresholdShape.data(), cellprobThresholdShape.size()));
+    
+    std::vector<int64_t> niter_values = {niter};
+    std::vector<int64_t> niterShape = {1};
+    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(memoryInfo, niter_values.data(), 1, niterShape.data(), niterShape.size()));
+   
+    if(terminating){
+      preprocessingEnd();
+      cv::Mat m1;
+      return m1;
+    }
+    runOptionsEncoder.UnsetTerminate();
+    std::vector<const char*> inputNames = getInputNamesCP(sessionAfterRunNet);
+    std::vector<const char*> outputNames = getOutputNamesCP(sessionAfterRunNet);
+    auto outputTensors =  sessionAfterRunNet->Run(runOptionsEncoder, inputNames.data(), inputTensors.data(), inputTensors.size(), outputNames.data(), outputNames.size());
+    for (size_t i = 0; i < inputNames.size(); ++i) {
+      delete [] inputNames[i];
+    }
+    for (size_t i = 0; i < outputNames.size(); ++i) {
+      delete [] outputNames[i];
+    }
+
+    auto maskValues = outputTensors[0].GetTensorMutableData<int64_t>();
+    auto maskShape = outputTensors[0].GetTensorTypeAndShapeInfo().GetShape();
+    maskVector.assign(maskValues, maskValues + maskShape[0] * maskShape[1]);
+
+    auto flowErrorsValues = outputTensors[1].GetTensorMutableData<float>();
+    auto flowErrorsShape = outputTensors[1].GetTensorTypeAndShapeInfo().GetShape();
+    flowErrorsVector.assign(flowErrorsValues, flowErrorsValues + flowErrorsShape[0]);
+
+    cv::Mat mask = changeFlowThreshold(flow_threshold, min_size);
+
+    preprocessingEnd();
+    return mask;
+  }catch(Ort::Exception& e){
+    std::cout << e.what() << std::endl;
+    preprocessingEnd();
+    cv::Mat m1;
+    return m1;
   }
 }
 
@@ -300,7 +369,7 @@ void HSVtoRGB(float& fR, float& fG, float& fB, float& fH, float& fS, float& fV) 
   fB += fM;
 }
 
-void saveOutputMask(cv::Mat mask, cv::Size imageSize, float flow_threshold, int min_size){
+void saveOutputMask(cv::Mat mask, cv::Size imageSize, float cellprob_threshold, float flow_threshold, int min_size){
   double minVal;
   double maxVal;
   cv::Point minLoc;
@@ -318,8 +387,46 @@ void saveOutputMask(cv::Mat mask, cv::Size imageSize, float flow_threshold, int 
     outputMask.setTo(cv::Scalar(fR * 255, fG * 255, fB * 255), mask == (i + 1));
   }
   cv::resize(outputMask, outputMask, imageSize);
-  std::stringstream ss;
-  ss << std::fixed << std::setprecision(2) << flow_threshold;  
-  std::string fileName = "outputMask" + ss.str() + "_" + std::to_string(min_size);
+  std::stringstream ss0, ss1;
+  ss0 << std::fixed << std::setprecision(2) << cellprob_threshold;
+  ss1 << std::fixed << std::setprecision(2) << flow_threshold;
+  std::string fileName = "outputMask_" + ss0.str() + "_" + ss1.str() + "_" + std::to_string(min_size);
   cv::imwrite(fileName + ".png", outputMask);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

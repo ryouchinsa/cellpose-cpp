@@ -28,8 +28,8 @@ class Cyto3ONNX(nn.Module):
         model_path = cp_model.model_path(model_type)
         self.net.load_model(model_path, device=self.device)
 
-    def forward(self, img, img_size, channels, diameter, niter):
-        print("--- Cyto3ONNX forward", img.shape, img_size, channels, diameter, niter)
+    def forward(self, img, img_size, channels, diameter, cellprob_threshold, niter):
+        print("--- forward", img.shape, img_size, channels, diameter, cellprob_threshold, niter)
         img = torch.permute(img, (0, 2, 3, 1))
         print(img.shape)
         img = img[:, :, :, channels]
@@ -56,45 +56,21 @@ class Cyto3ONNX(nn.Module):
         )
         yf = torch.permute(yf, (0, 2, 3, 1))
         cellprob = yf[..., 2]
+        cellprob = cellprob[0]
         dP = yf[..., :2]
         dP = torch.permute(dP, (3, 0, 1, 2))
+        dP = dP[:, 0]
         styles = styles.squeeze()
         print(dP.shape)
         print(cellprob.shape)
         print(styles.shape)
         print("--- _run_net end")
 
-        print("--- follow_flows begin")
-        dP = dP[:, 0]
-        cellprob = cellprob[0]
-        print(dP.shape)
-        print(cellprob.shape)
-        print(torch.max(cellprob))
-        cellprob_threshold = 0.0
-        cellprob_bool = cellprob > cellprob_threshold
-        inds = get_inds(cellprob_bool)
-        print(inds.shape)
-        print(inds)
-        p_final = self.follow_flows(dP * (cellprob > cellprob_threshold) / 5., inds, img_size, niter)
-        p_final = p_final.long()
-        print(p_final.shape)
-        print(p_final)
-        print("--- follow_flows end")
+        mask, flow_errors = after_run_net(cellprob, dP, img_size, cellprob_threshold, niter, self.device)
 
-        print("--- get_masks_torch begin")
-        max_size_fraction = 0.4
-        mask = self.get_masks_torch(p_final, inds, dP.shape[1:], img_size, max_size_fraction)
-        mask = torch.reshape(mask, (img_size[0], img_size[1]))
-        del p_final
-        print("--- get_masks_torch end")
-        
-        print("--- remove_bad_flow_masks begin")
-        mask, flow_errors = self.remove_bad_flow_masks(mask, dP)
-        print("--- remove_bad_flow_masks end")
-        
         rgb_of_flows = torch.zeros((*dP.shape[1:], 3), dtype=torch.uint8, device=self.device)
         rgb_of_flows = dx_to_circ(dP, percentiles, rgb_of_flows)
-        return mask, flow_errors, rgb_of_flows
+        return mask, flow_errors, rgb_of_flows, cellprob, dP
 
     def run_net(self, net, imgi, img_size, bsize, tile_overlap, diameter):
         nout = net.nout
@@ -186,156 +162,194 @@ class Cyto3ONNX(nn.Module):
         stylei /= torch.sum(stylei**2)**0.5
         styles[0] = stylei
         yf = yf[:, :, ypad1 : img_size_pad[1] - ypad2, xpad1 : img_size_pad[0] - xpad2]
+        print(yf.shape)
         return yf, styles
 
-    def follow_flows(self, dP, inds, img_size, niter):
-        ndim = img_size.shape[0]
-        pt = torch.zeros((*[1]*ndim, inds.shape[1], ndim), dtype=torch.float32, device=self.device)
-        print(pt.shape)
-        im = torch.zeros((1, ndim, img_size[0], img_size[1]), dtype=torch.float32, device=self.device)
-        print(im.shape)
-        for n in range(ndim):
-            pt[0, 0, :, ndim - n - 1] = inds[n]
-            im[0, ndim - n - 1] = dP[n]
-        img_size_minus_1 = img_size.clone()
-        img_size_minus_1 -= 1
-        img_size_minus_1 = img_size_minus_1.long()
-        for k in range(ndim):
-            im[:, k] *= 2. / img_size_minus_1[k]
-            pt[..., k] /= img_size_minus_1[k]
-        pt *= 2 
-        pt -= 1
-        pt = set_pt(im, niter, ndim, pt)
-        pt += 1 
-        pt *= 0.5
-        for k in range(ndim):
-            pt[..., k] *= img_size_minus_1[k]
-        return pt[..., [1, 0]].squeeze().T
+class CP_AFTER_RUN_NET(nn.Module):
 
-    def get_masks_torch(self, pt, inds, shape0, img_size, max_size_fraction):
-        print(pt.shape)
-        print(inds.shape)
-        print(shape0)
-        ndim = len(shape0)
-        
-        rpad = 20
-        pt += rpad
-        pt = torch.clamp(pt, min=0)
-        for i in range(pt.shape[0]):
-            max_size = shape0[i]+rpad-1
-            if type(max_size) is not int:
-                max_size = max_size.to(self.device)
-            pt[i] = torch.clamp(pt[i], max=max_size)
-        t = torch.empty(shape0[0] + 2*rpad, shape0[1] + 2*rpad, device=self.device)
-        shape = t.size()
-        print(shape)
-        img_size_pad = img_size + 2*rpad
-        img_size_pad = img_size_pad.long()
-        print(img_size_pad)
+    def __init__(self, device=None):
+        super(CP_AFTER_RUN_NET, self).__init__()
+        self.device = device
 
-        output, counts = torch.unique(pt.t(), return_counts=True, dim=0)
-        h1 = torch.zeros(shape, dtype=torch.long, device=self.device)
-        pt0 = output.t()[0]
-        pt1 = output.t()[1]
-        pt_tuple = (pt0, pt1)
-        h1[pt_tuple] = counts.long()
-
-        hmax1 = max_pool_nd(h1.unsqueeze(0), img_size_pad, kernel_size=5)
-        hmax1 = hmax1.squeeze()
-
-        seeds1_tuple = torch.nonzero((h1 - hmax1 > -1e-6) * (h1 > 10), as_tuple=True)
-        del hmax1
-        npts = h1[seeds1_tuple]
-        isort1 = torch.argsort(npts)
-        seeds1_0 = seeds1_tuple[0]
-        seeds1_0 = seeds1_0[isort1]
-        seeds1_1 = seeds1_tuple[1]
-        seeds1_1 = seeds1_1[isort1]
-        seeds1 = torch.stack((seeds1_0, seeds1_1), dim=1)
-
-        n_seeds = seeds1.shape[0]
-        h_slc = torch.zeros((n_seeds, *[11]*ndim), device=self.device)
-        h_slc = set_h_slc(h1, seeds1, h_slc)
-        del h1
-
-        seed_masks = torch.zeros((n_seeds, *[11]*ndim), device=self.device)
-        seed_masks[:,5,5] = 1
-        seed_masks_size = img_size.clone()
-        seed_masks_size[0] = seed_masks.shape[1]
-        seed_masks_size[1] = seed_masks.shape[2]
-        seed_masks_size = seed_masks_size.long()
-        for iter in range(5):
-            seed_masks = max_pool_nd(seed_masks, seed_masks_size, kernel_size=3)
-            seed_masks *= h_slc > 2
-        del h_slc
-
-        M1 = torch.zeros(shape, dtype=torch.long, device=self.device)
-        M1 = set_M1(seeds1, seed_masks, M1)
-        del seed_masks
-        pt0 = pt[0]
-        pt1 = pt[1]
-        pt_tuple = (pt0, pt1)
-        M1 = M1[pt_tuple]
-
-        M0 = torch.zeros(shape0, dtype=torch.long, device=self.device)
-        inds0 = inds[0]
-        inds1 = inds[1]
-        inds_tuple = (inds0, inds1)
-        M0[inds_tuple] = M1
-        uniq, counts = torch.unique(M0, return_counts=True)
-        big = shape0[0] * shape0[1] * max_size_fraction
-        bigc = uniq[counts > big]
-        bigc = bigc[bigc > 0]
-        M0 = set_labels_zero(bigc, M0)
-        print(M0.shape)
-        print(M0[M0 > 0])
-        return M0
-
-    def remove_bad_flow_masks(self, mask, flows):
-        print(mask.shape)
-        print(flows.shape)
-        dP_masks = self.masks_to_flows(mask)
-        print(dP_masks.shape)
-        print(dP_masks[dP_masks > 0])
-        flow_errors = torch.zeros((torch.max(mask)), dtype=torch.float32, device=self.device)
-        for i in range(dP_masks.shape[0]):
-            error = (dP_masks[i] - flows[i] / 5.)**2
-            m = torch.zeros((torch.max(mask)), dtype=torch.float32, device=self.device)
-            m = set_flow_errors(error, mask, m)
-            flow_errors += m
+    def forward(self, cellprob, dP, img_size, cellprob_threshold, niter):
+        print("--- CP_AFTER_RUN_NET forward", cellprob.shape, dP.shape, img_size, cellprob_threshold, niter)
+        mask, flow_errors = after_run_net(cellprob, dP, img_size, cellprob_threshold, niter, self.device)
         return mask, flow_errors
 
-    def masks_to_flows(self, masks):
-        Ly0, Lx0 = masks.shape
-        Ly, Lx = Ly0 + 2, Lx0 + 2
-        masks = get_masks_if_max_0(masks)
-        masks_padded = torch.nn.functional.pad(masks, (1, 1, 1, 1))
-        shape = masks_padded.shape
-        yx = torch.nonzero(masks_padded).t()
-        neighbors = torch.zeros((2, 9, yx[0].shape[0]), dtype=torch.long, device=self.device)
-        yxi = [[0, -1, 1, 0, 0, -1, -1, 1, 1], [0, 0, 0, -1, 1, -1, 1, -1, 1]]
-        for i in range(9):
-            neighbors[0, i] = yx[0] + yxi[0][i]
-            neighbors[1, i] = yx[1] + yxi[1][i]
-        isneighbor = torch.ones((9, yx[0].shape[0]), dtype=torch.bool, device=self.device)
-        m0 = masks_padded[neighbors[0, 0], neighbors[1, 0]]
-        for i in range(1, 9):
-            isneighbor[i] = masks_padded[neighbors[0, i], neighbors[1, i]] == m0
-        del m0, masks_padded
+def after_run_net(cellprob, dP, img_size, cellprob_threshold, niter, device):
+    print("--- follow_flows begin")
+    print(torch.max(cellprob))
+    print(torch.min(cellprob))
+    cellprob_bool = cellprob > cellprob_threshold
+    inds = get_inds(cellprob_bool)
+    print(inds.shape)
+    print(inds)
+    p_final = follow_flows(dP * cellprob_bool / 5., inds, img_size, niter, device)
+    p_final = p_final.long()
+    print(p_final.shape)
+    print(p_final)
+    print("--- follow_flows end")
 
-        labels_num = torch.max(masks)
-        centers = torch.zeros((labels_num, 2), dtype=torch.long, device=self.device)
-        ext = torch.zeros((labels_num), dtype=torch.long, device=self.device)
-        centers, ext = set_find_objects(masks, centers, ext)
-        meds_p = centers + 1
-        T = torch.zeros(shape, dtype=torch.float32, device=self.device)
-        mu = set_extend_centers(neighbors, isneighbor, meds_p, ext, T)
-        del neighbors, isneighbor, meds_p
+    print("--- get_masks_torch begin")
+    max_size_fraction = 0.4
+    mask = get_masks_torch(p_final, inds, dP.shape[1:], img_size, max_size_fraction, device)
+    mask = torch.reshape(mask, (img_size[0], img_size[1]))
+    del p_final
+    print("--- get_masks_torch end")
+    
+    print("--- get_flow_errors begin")
+    flow_errors = get_flow_errors(mask, dP, device)
+    print("--- get_flow_errors end")
+    return mask, flow_errors
 
-        mu /= (1e-60 + torch.sum(mu**2, dim=0)**0.5)
-        mu0 = torch.zeros((2, Ly0, Lx0), dtype=torch.float32, device=self.device)
-        mu0[:, yx[0] - 1, yx[1] - 1] = mu
-        return mu0
+def follow_flows(dP, inds, img_size, niter, device):
+    ndim = img_size.shape[0]
+    pt = torch.zeros((*[1]*ndim, inds.shape[1], ndim), dtype=torch.float32, device=device)
+    print(pt.shape)
+    im = torch.zeros((1, ndim, img_size[0], img_size[1]), dtype=torch.float32, device=device)
+    print(im.shape)
+    for n in range(ndim):
+        pt[0, 0, :, ndim - n - 1] = inds[n]
+        im[0, ndim - n - 1] = dP[n]
+    img_size_minus_1 = img_size.clone()
+    img_size_minus_1 -= 1
+    img_size_minus_1 = img_size_minus_1.long()
+    for k in range(ndim):
+        im[:, k] *= 2. / img_size_minus_1[k]
+        pt[..., k] /= img_size_minus_1[k]
+    pt *= 2 
+    pt -= 1
+    pt = set_pt(im, niter, ndim, pt)
+    pt += 1 
+    pt *= 0.5
+    for k in range(ndim):
+        pt[..., k] *= img_size_minus_1[k]
+    return pt[..., [1, 0]].squeeze().T
+
+def get_masks_torch(pt, inds, shape0, img_size, max_size_fraction, device):
+    print(pt.shape)
+    print(inds.shape)
+    print(shape0)
+    ndim = len(shape0)
+    
+    rpad = 20
+    pt += rpad
+    pt = torch.clamp(pt, min=0)
+    for i in range(pt.shape[0]):
+        max_size = shape0[i]+rpad-1
+        if type(max_size) is not int:
+            max_size = max_size.to(device)
+        pt[i] = torch.clamp(pt[i], max=max_size)
+    t = torch.empty(shape0[0] + 2*rpad, shape0[1] + 2*rpad, device=device)
+    shape = t.size()
+    print(shape)
+    img_size_pad = img_size + 2*rpad
+    img_size_pad = img_size_pad.long()
+    print(img_size_pad)
+
+    output, counts = torch.unique(pt.t(), return_counts=True, dim=0)
+    h1 = torch.zeros(shape, dtype=torch.long, device=device)
+    pt0 = output.t()[0]
+    pt1 = output.t()[1]
+    pt_tuple = (pt0, pt1)
+    h1[pt_tuple] = counts.long()
+
+    hmax1 = max_pool_nd(h1.unsqueeze(0), img_size_pad, kernel_size=5)
+    hmax1 = hmax1.squeeze()
+
+    seeds1_tuple = torch.nonzero((h1 - hmax1 > -1e-6) * (h1 > 10), as_tuple=True)
+    del hmax1
+    npts = h1[seeds1_tuple]
+    isort1 = torch.argsort(npts)
+    seeds1_0 = seeds1_tuple[0]
+    seeds1_0 = seeds1_0[isort1]
+    seeds1_1 = seeds1_tuple[1]
+    seeds1_1 = seeds1_1[isort1]
+    seeds1 = torch.stack((seeds1_0, seeds1_1), dim=1)
+
+    n_seeds = seeds1.shape[0]
+    h_slc = torch.zeros((n_seeds, *[11]*ndim), device=device)
+    h_slc = set_h_slc(h1, seeds1, h_slc)
+    del h1
+
+    seed_masks = torch.zeros((n_seeds, *[11]*ndim), device=device)
+    seed_masks[:,5,5] = 1
+    seed_masks_size = img_size.clone()
+    seed_masks_size[0] = seed_masks.shape[1]
+    seed_masks_size[1] = seed_masks.shape[2]
+    seed_masks_size = seed_masks_size.long()
+    for iter in range(5):
+        seed_masks = max_pool_nd(seed_masks, seed_masks_size, kernel_size=3)
+        seed_masks *= h_slc > 2
+    del h_slc
+
+    M1 = torch.zeros(shape, dtype=torch.long, device=device)
+    M1 = set_M1(seeds1, seed_masks, M1)
+    del seed_masks
+    pt0 = pt[0]
+    pt1 = pt[1]
+    pt_tuple = (pt0, pt1)
+    M1 = M1[pt_tuple]
+
+    M0 = torch.zeros(shape0, dtype=torch.long, device=device)
+    inds0 = inds[0]
+    inds1 = inds[1]
+    inds_tuple = (inds0, inds1)
+    M0[inds_tuple] = M1
+    uniq, counts = torch.unique(M0, return_counts=True)
+    big = shape0[0] * shape0[1] * max_size_fraction
+    bigc = uniq[counts > big]
+    bigc = bigc[bigc > 0]
+    M0 = set_labels_zero(bigc, M0)
+    print(M0.shape)
+    print(M0[M0 > 0])
+    return M0
+
+def get_flow_errors(mask, flows, device):
+    print(mask.shape)
+    print(flows.shape)
+    dP_masks = masks_to_flows(mask, device)
+    print(dP_masks.shape)
+    print(dP_masks[dP_masks > 0])
+    flow_errors = torch.zeros((torch.max(mask)), dtype=torch.float32, device=device)
+    for i in range(dP_masks.shape[0]):
+        error = (dP_masks[i] - flows[i] / 5.)**2
+        m = torch.zeros((torch.max(mask)), dtype=torch.float32, device=device)
+        m = set_flow_errors(error, mask, m)
+        flow_errors += m
+    return flow_errors
+
+def masks_to_flows(masks, device):
+    Ly0, Lx0 = masks.shape
+    Ly, Lx = Ly0 + 2, Lx0 + 2
+    masks = get_masks_if_max_0(masks)
+    masks_padded = torch.nn.functional.pad(masks, (1, 1, 1, 1))
+    shape = masks_padded.shape
+    yx = torch.nonzero(masks_padded).t()
+    neighbors = torch.zeros((2, 9, yx[0].shape[0]), dtype=torch.long, device=device)
+    yxi = [[0, -1, 1, 0, 0, -1, -1, 1, 1], [0, 0, 0, -1, 1, -1, 1, -1, 1]]
+    for i in range(9):
+        neighbors[0, i] = yx[0] + yxi[0][i]
+        neighbors[1, i] = yx[1] + yxi[1][i]
+    isneighbor = torch.ones((9, yx[0].shape[0]), dtype=torch.bool, device=device)
+    m0 = masks_padded[neighbors[0, 0], neighbors[1, 0]]
+    for i in range(1, 9):
+        isneighbor[i] = masks_padded[neighbors[0, i], neighbors[1, i]] == m0
+    del m0, masks_padded
+
+    labels_num = torch.max(masks)
+    centers = torch.zeros((labels_num, 2), dtype=torch.long, device=device)
+    ext = torch.zeros((labels_num), dtype=torch.long, device=device)
+    centers, ext = set_find_objects(masks, centers, ext)
+    meds_p = centers + 1
+    T = torch.zeros(shape, dtype=torch.float32, device=device)
+    mu = set_extend_centers(neighbors, isneighbor, meds_p, ext, T)
+    del neighbors, isneighbor, meds_p
+
+    mu /= (1e-60 + torch.sum(mu**2, dim=0)**0.5)
+    mu0 = torch.zeros((2, Ly0, Lx0), dtype=torch.float32, device=device)
+    mu0[:, yx[0] - 1, yx[1] - 1] = mu
+    return mu0
 
 def normalize99(img, percentiles):
     input = torch.flatten(img)
@@ -550,13 +564,14 @@ def dx_to_circ(dP, percentiles, rgb):
     return rgb
 
 def show(image_path, device):
+    start = time.perf_counter()
     model = Cyto3ONNX(device=device)
     img = imread(image_path)
     img_original = img
-    img_resized, img_size, channels, diameter, niter = get_inputs(img, device=device)
-    start = time.perf_counter()
-    mask, flow_errors, rgb_of_flows = model.forward(img_resized, img_size, channels, diameter, niter)
+    img_resized, img_size, channels, diameter, cellprob_threshold, niter = get_inputs(img, device=device)
+    mask, flow_errors, rgb_of_flows, cellprob, dP = model.forward(img_resized, img_size, channels, diameter, cellprob_threshold, niter)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+
     start = time.perf_counter()
     flow_threshold = 0.8
     min_size = 15
@@ -564,11 +579,18 @@ def show(image_path, device):
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, rgb_of_flows)
 
+    start = time.perf_counter()
+    after_run_net = CP_AFTER_RUN_NET(device=device)
+    cellprob_threshold = -1.0
+    mask, flow_errors = after_run_net.forward(cellprob, dP, img_size, cellprob_threshold, niter)
+    mask = post_process(mask, flow_errors, flow_threshold, min_size)
+    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+    show_mask(img_original, img_size, mask, rgb_of_flows)
+
 def export_onnx(image_path, device):
-    onnx_path = "cyto3.onnx"
     model = Cyto3ONNX(device=device)
     img = imread(image_path)
-    img_resized, img_size, channels, diameter, niter = get_inputs(img, niter_default=20, device=device)
+    img_resized, img_size, channels, diameter, cellprob_threshold, niter = get_inputs(img, niter_default=20, device=device)
     torch.onnx.export(
         model,
         (
@@ -576,19 +598,94 @@ def export_onnx(image_path, device):
             img_size,
             channels,
             diameter,
+            cellprob_threshold, 
             niter,
         ),
-        onnx_path,
+        "cyto3.onnx",
         verbose=False,
         export_params=True,
         opset_version=17,
         do_constant_folding=True,
-        input_names=["img",  "img_size", "channels", "diameter", "niter"],
-        output_names=["mask", "flow_errors", "dP"],
+        input_names=["img",  "img_size", "channels", "diameter", "cellprob_threshold", "niter"],
+        output_names=["mask", "flow_errors", "rgb_of_flows", "cellprob", "dP"],
+    )
+
+    after_run_net = CP_AFTER_RUN_NET(device=device)
+    cellprob = torch.randn(img_size[0], img_size[1], dtype=torch.float32)
+    dP = torch.randn(2, img_size[0], img_size[1], dtype=torch.float32)
+    torch.onnx.export(
+        after_run_net,
+        (
+            cellprob,
+            dP,
+            img_size,
+            cellprob_threshold, 
+            niter,
+        ),
+        "after_run_net.onnx",
+        verbose=False,
+        export_params=True,
+        opset_version=17,
+        do_constant_folding=True,
+        input_names=["cellprob", "dP", "img_size", "cellprob_threshold", "niter"],
+        output_names=["mask", "flow_errors"],
     )
 
 def import_onnx(image_path, device):
-    onnx_path = "cyto3.onnx"
+    start = time.perf_counter()
+    session, input_names, output_names = get_session("cyto3.onnx", device)
+    img = imread(image_path)
+    img_original = img
+    img_resized, img_size, channels, diameter, cellprob_threshold, niter = get_inputs(img, device=device)
+    inputs = [
+        img_resized.cpu().numpy(), 
+        img_size.cpu().numpy(), 
+        channels.cpu().numpy(),
+        diameter.cpu().numpy(), 
+        cellprob_threshold.cpu().numpy(), 
+        niter.cpu().numpy(), 
+    ]
+    mask, flow_errors, rgb_of_flows, cellprob, dP = session.run(
+        output_names, 
+        {
+        input_names[i]: inputs[i] for i in range(len(input_names))
+        }
+    )
+    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+
+    start = time.perf_counter()
+    mask = torch.from_numpy(mask)
+    flow_errors = torch.from_numpy(flow_errors)
+    rgb_of_flows = torch.from_numpy(rgb_of_flows)
+    flow_threshold = 0.8
+    min_size = 15
+    mask = post_process(mask, flow_errors, flow_threshold, min_size)
+    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+    show_mask(img_original, img_size, mask, rgb_of_flows)
+
+    start = time.perf_counter()
+    cellprob_threshold = torch.tensor([-1.0], dtype=torch.float32)
+    session, input_names, output_names = get_session("after_run_net.onnx", device)
+    inputs = [
+        cellprob, 
+        dP, 
+        img_size.cpu().numpy(), 
+        cellprob_threshold.cpu().numpy(), 
+        niter.cpu().numpy(), 
+    ]
+    mask, flow_errors = session.run(
+        output_names, 
+        {
+        input_names[i]: inputs[i] for i in range(len(input_names))
+        }
+    )
+    mask = torch.from_numpy(mask)
+    flow_errors = torch.from_numpy(flow_errors)
+    mask = post_process(mask, flow_errors, flow_threshold, min_size)
+    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+    show_mask(img_original, img_size, mask, rgb_of_flows)
+
+def get_session(onnx_path, device):
     print(onnxruntime.get_available_providers())
     if device.type == "cpu":
         providers=["CPUExecutionProvider"]
@@ -621,33 +718,7 @@ def import_onnx(image_path, device):
     print(input_shapes)
     print(output_names)
     print(output_shapes)
-    img = imread(image_path)
-    img_original = img
-    img_resized, img_size, channels, diameter, niter = get_inputs(img, device=device)
-    start = time.perf_counter()
-    inputs = [
-        img_resized.cpu().numpy(), 
-        img_size.cpu().numpy(), 
-        channels.cpu().numpy(),
-        diameter.cpu().numpy(), 
-        niter.cpu().numpy(), 
-    ]
-    mask, flow_errors, rgb_of_flows = session.run(
-        output_names, 
-        {
-        input_names[i]: inputs[i] for i in range(len(input_names))
-        }
-    )
-    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
-    start = time.perf_counter()
-    mask = torch.from_numpy(mask)
-    flow_errors = torch.from_numpy(flow_errors)
-    rgb_of_flows = torch.from_numpy(rgb_of_flows)
-    flow_threshold = 0.8
-    min_size = 15
-    mask = post_process(mask, flow_errors, flow_threshold, min_size)
-    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
-    show_mask(img_original, img_size, mask, rgb_of_flows)
+    return session, input_names, output_names
 
 def imread(image_path):
     img = cv2.imread(image_path)
@@ -665,11 +736,13 @@ def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     print(img_size)
     channels = torch.tensor([1, 0], dtype=torch.long)
     print("channels", channels)
-    diameter = torch.tensor([30], dtype=torch.long)
+    diameter = torch.tensor([40], dtype=torch.long)
     print("diameter", diameter)
+    cellprob_threshold = torch.tensor([0.0], dtype=torch.float32)
+    print("cellprob_threshold", cellprob_threshold)
     niter = torch.tensor([niter_default], dtype=torch.long)
     print("niter", niter)
-    return img, img_size, channels, diameter, niter
+    return img, img_size, channels, diameter, cellprob_threshold, niter
 
 def show_mask(img_original, img_size, mask, rgb_of_flows):
     show_original = True;
