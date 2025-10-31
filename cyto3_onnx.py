@@ -70,7 +70,7 @@ class Cyto3ONNX(nn.Module):
 
         rgb_of_flows = torch.zeros((*dP.shape[1:], 3), dtype=torch.uint8, device=self.device)
         rgb_of_flows = dx_to_circ(dP, percentiles, rgb_of_flows)
-        return mask, flow_errors, rgb_of_flows, cellprob, dP
+        return mask, flow_errors, rgb_of_flows
 
     def run_net(self, net, imgi, img_size, bsize, tile_overlap, diameter):
         nout = net.nout
@@ -164,17 +164,6 @@ class Cyto3ONNX(nn.Module):
         yf = yf[:, :, ypad1 : img_size_pad[1] - ypad2, xpad1 : img_size_pad[0] - xpad2]
         print(yf.shape)
         return yf, styles
-
-class CP_AFTER_RUN_NET(nn.Module):
-
-    def __init__(self, device=None):
-        super(CP_AFTER_RUN_NET, self).__init__()
-        self.device = device
-
-    def forward(self, cellprob, dP, img_size, cellprob_threshold, niter):
-        print("--- CP_AFTER_RUN_NET forward", cellprob.shape, dP.shape, img_size, cellprob_threshold, niter)
-        mask, flow_errors = after_run_net(cellprob, dP, img_size, cellprob_threshold, niter, self.device)
-        return mask, flow_errors
 
 def after_run_net(cellprob, dP, img_size, cellprob_threshold, niter, device):
     print("--- follow_flows begin")
@@ -566,25 +555,20 @@ def dx_to_circ(dP, percentiles, rgb):
 def show(image_path, device):
     start = time.perf_counter()
     model = Cyto3ONNX(device=device)
+    print(f"load time: {(time.perf_counter() - start) * 1000:.2f} ms")
+
+    start = time.perf_counter()
     img = imread(image_path)
     img_original = img
     img_resized, img_size, channels, diameter, cellprob_threshold, niter = get_inputs(img, device=device)
-    mask, flow_errors, rgb_of_flows, cellprob, dP = model.forward(img_resized, img_size, channels, diameter, cellprob_threshold, niter)
+    mask, flow_errors, rgb_of_flows = model.forward(img_resized, img_size, channels, diameter, cellprob_threshold, niter)
     print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
 
     start = time.perf_counter()
     flow_threshold = 0.8
     min_size = 15
     mask = post_process(mask, flow_errors, flow_threshold, min_size)
-    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
-    show_mask(img_original, img_size, mask, rgb_of_flows)
-
-    start = time.perf_counter()
-    after_run_net = CP_AFTER_RUN_NET(device=device)
-    cellprob_threshold = -1.0
-    mask, flow_errors = after_run_net.forward(cellprob, dP, img_size, cellprob_threshold, niter)
-    mask = post_process(mask, flow_errors, flow_threshold, min_size)
-    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+    print(f"post_process time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, rgb_of_flows)
 
 def export_onnx(image_path, device):
@@ -598,7 +582,7 @@ def export_onnx(image_path, device):
             img_size,
             channels,
             diameter,
-            cellprob_threshold, 
+            cellprob_threshold,
             niter,
         ),
         "cyto3.onnx",
@@ -607,28 +591,7 @@ def export_onnx(image_path, device):
         opset_version=17,
         do_constant_folding=True,
         input_names=["img",  "img_size", "channels", "diameter", "cellprob_threshold", "niter"],
-        output_names=["mask", "flow_errors", "rgb_of_flows", "cellprob", "dP"],
-    )
-
-    after_run_net = CP_AFTER_RUN_NET(device=device)
-    cellprob = torch.randn(img_size[0], img_size[1], dtype=torch.float32)
-    dP = torch.randn(2, img_size[0], img_size[1], dtype=torch.float32)
-    torch.onnx.export(
-        after_run_net,
-        (
-            cellprob,
-            dP,
-            img_size,
-            cellprob_threshold, 
-            niter,
-        ),
-        "after_run_net.onnx",
-        verbose=False,
-        export_params=True,
-        opset_version=17,
-        do_constant_folding=True,
-        input_names=["cellprob", "dP", "img_size", "cellprob_threshold", "niter"],
-        output_names=["mask", "flow_errors"],
+        output_names=["mask", "flow_errors", "rgb_of_flows"],
     )
 
 def import_onnx(image_path, device):
@@ -645,7 +608,10 @@ def import_onnx(image_path, device):
         cellprob_threshold.cpu().numpy(), 
         niter.cpu().numpy(), 
     ]
-    mask, flow_errors, rgb_of_flows, cellprob, dP = session.run(
+    print(f"load time: {(time.perf_counter() - start) * 1000:.2f} ms")
+
+    start = time.perf_counter()
+    mask, flow_errors, rgb_of_flows = session.run(
         output_names, 
         {
         input_names[i]: inputs[i] for i in range(len(input_names))
@@ -660,29 +626,7 @@ def import_onnx(image_path, device):
     flow_threshold = 0.8
     min_size = 15
     mask = post_process(mask, flow_errors, flow_threshold, min_size)
-    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
-    show_mask(img_original, img_size, mask, rgb_of_flows)
-
-    start = time.perf_counter()
-    cellprob_threshold = torch.tensor([-1.0], dtype=torch.float32)
-    session, input_names, output_names = get_session("after_run_net.onnx", device)
-    inputs = [
-        cellprob, 
-        dP, 
-        img_size.cpu().numpy(), 
-        cellprob_threshold.cpu().numpy(), 
-        niter.cpu().numpy(), 
-    ]
-    mask, flow_errors = session.run(
-        output_names, 
-        {
-        input_names[i]: inputs[i] for i in range(len(input_names))
-        }
-    )
-    mask = torch.from_numpy(mask)
-    flow_errors = torch.from_numpy(flow_errors)
-    mask = post_process(mask, flow_errors, flow_threshold, min_size)
-    print(f"infer time: {(time.perf_counter() - start) * 1000:.2f} ms")
+    print(f"post_process time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, rgb_of_flows)
 
 def get_session(onnx_path, device):
