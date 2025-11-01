@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
   cv::Size imageSize = cv::Size(image.cols, image.rows);
   cv::Size inputSize = cyto3.getInputSize();
   cv::resize(image, image, inputSize);
-  std::vector<int64_t> channels = {1, 2};
+  std::vector<int64_t> channels = {1, 0};
   int diameter = 40;
   float cellprob_threshold = 0.0;
   int niter = 200;

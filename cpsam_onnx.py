@@ -192,7 +192,7 @@ def after_run_net(cellprob, dP, img_size, cellprob_threshold, niter, device):
     print("--- follow_flows begin")
     print(torch.max(cellprob))
     print(torch.min(cellprob))
-    cellprob_bool = cellprob > cellprob_threshold
+    cellprob_bool = cellprob > cellprob_threshold.to(device)
     inds = get_inds(cellprob_bool)
     print(inds.shape)
     print(inds)
