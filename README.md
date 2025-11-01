@@ -5,7 +5,7 @@ This code is to run a [Cellpose](https://github.com/MouseLand/cellpose) ONNX mod
 
 Install [CUDA, cuDNN, PyTorch, and ONNX Runtime](https://rectlabel.com/pytorch/).
 
-Install Cellpose3 and Cellpose4.
+Install Cellpose3, Cellpose4, and Cellpose CPP Wrapper.
 ```bash
 git clone https://github.com/MouseLand/cellpose.git cellpose3 --branch v3.1.1
 git clone https://github.com/MouseLand/cellpose.git cellpose4
