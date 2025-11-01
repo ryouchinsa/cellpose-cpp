@@ -1,7 +1,7 @@
 ## Cellpose CPP Wrapper for macOS and Ubuntu GPU
 This code is to run a [Cellpose](https://github.com/MouseLand/cellpose) ONNX model in c++ code and implemented on the macOS app [RectLabel](https://rectlabel.com).
 
-<video src="https://github.com/user-attachments/assets/22048c89-2412-43e3-9c0d-d0e12134ded5" controls="controls" muted="muted" class="width-fit" style="max-height:640px; min-height: 200px"></video>
+<video src="https://github.com/user-attachments/assets/e3f7ae8c-e773-44f0-8cd8-de944f7f9cbc" controls="controls" muted="muted" class="width-fit" style="max-height:640px; min-height: 200px"></video>
 
 Install [CUDA, cuDNN, PyTorch, and ONNX Runtime](https://rectlabel.com/pytorch/).
 
