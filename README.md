@@ -64,6 +64,6 @@ Running time for demo_images/img00.png.
 
 | Model | Size | Infer(Apple M1) | Infer(g4dn.xlarge) |
 | :---: | :---: | :---: | :---: |
-| cyto3.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx251102.zip)) | 27.5MB | 8s | 2s |
+| cyto3.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx251102.zip)) | 27.4MB | 8s | 2s |
 | cpsam.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cpsam.onnx251102.zip)) | 1.22GB | 18s | 3s |
 
