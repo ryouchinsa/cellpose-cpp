@@ -12,7 +12,7 @@ if __name__ == "__main__":
         gpu = False
     else:
         gpu = True
-    output = io.load_train_test_data(args.train_dir, mask_filter="_masks", )
+    output = io.load_train_test_data(args.train_dir, mask_filter="_masks")
     images, labels, image_names, test_images, test_labels, image_names_test = output
     model = models.CellposeModel(gpu=gpu, use_bfloat16=False)
     model_path, train_losses, test_losses = train.train_seg(model.net,
