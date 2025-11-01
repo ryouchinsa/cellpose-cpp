@@ -62,8 +62,8 @@ cmake --build build
 
 Running time for demo_images/img00.png.
 
-| Model | Size | Load(Apple M1) | Infer(Apple M1) | Load(g4dn.xlarge) | Infer(g4dn.xlarge) |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| cyto3.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx251102.zip)) | 27.5MB | 0.5s | 8s | 3s | 2s |
-| cpsam.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cpsam.onnx251102.zip)) | 1.22GB | 3s | 18s | 7s | 3s |
+| Model | Size | Infer(Apple M1) | Infer(g4dn.xlarge) |
+| :---: | :---: | :---: | :---: |
+| cyto3.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cyto3.onnx251102.zip)) | 27.5MB | 8s | 2s |
+| cpsam.onnx <br>([download](https://huggingface.co/rectlabel/cellpose/resolve/main/cpsam.onnx251102.zip)) | 1.22GB | 18s | 3s |
 
