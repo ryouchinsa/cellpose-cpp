@@ -11,6 +11,7 @@ DEFINE_string(device, "cpu", "cpu or cuda:0(1,2,3...)");
 DEFINE_int32(channel0, 0, "0, 1, 2");
 DEFINE_int32(channel1, 0, "0, 1, 2");
 DEFINE_int32(diameter, 30, "20, 30, 40");
+DEFINE_double(flow_threshold, 0.4, "0.4, 0.8");
 DEFINE_bool(h, false, "Show help");
 
 int main(int argc, char** argv) {
@@ -41,24 +42,21 @@ int main(int argc, char** argv) {
   int diameter = FLAGS_diameter;
   float cellprob_threshold = 0.0;
   int niter = 200;
-  float flow_threshold = 0.4;
+  float flow_threshold = FLAGS_flow_threshold;
   int min_size = 15;
   auto [mask, rgbOfFlows] = cyto3.preprocessImage(image, inputSize, channels, diameter, cellprob_threshold, niter, flow_threshold, min_size);
   if(mask.total() == 0){
     std::cout<<"preprocessImage error"<<std::endl;
     return 1;
   }
-  saveOutputMask(mask, imageSize, flow_threshold, min_size);
+  std::string filename = std::filesystem::path(FLAGS_image).filename().stem();
+  std::string fileName_mask = filename + "_masks.png";
+  std::string fileName_mask_color = filename + "_masks_color.png";
+  std::string fileName_rgbOfFlows = filename + "_rgbOfFlows.jpg";
+  cv::imwrite(fileName_mask, mask);
+  saveOutputMask(mask, imageSize, fileName_mask_color);
   cv::resize(rgbOfFlows, rgbOfFlows, imageSize);
-  cv::imwrite("rgbOfFlows.jpg", rgbOfFlows);
-  end = std::chrono::steady_clock::now();
-  std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
-
-  begin = std::chrono::steady_clock::now();
-  flow_threshold = 0.8;
-  min_size = 15;
-  mask = cyto3.changeFlowThreshold(flow_threshold, min_size);
-  saveOutputMask(mask, imageSize, flow_threshold, min_size);
+  cv::imwrite(fileName_rgbOfFlows, rgbOfFlows);
   end = std::chrono::steady_clock::now();
   std::cout << "sec = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1000000.0 <<std::endl;
   return 0;

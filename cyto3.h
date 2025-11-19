@@ -4,6 +4,7 @@
 #include <list>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <opencv2/core.hpp>
 #include <onnxruntime_cxx_api.h>
 #include "fill_voids.hpp"
@@ -36,6 +37,6 @@ class Cyto3 {
   void preprocessingEnd();
 };
 
-void saveOutputMask(cv::Mat mask, cv::Size imageSize, float flow_threshold, int min_size);
+void saveOutputMask(cv::Mat mask, cv::Size imageSize, std::string path);
 
 #endif

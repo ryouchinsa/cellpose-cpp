@@ -293,7 +293,7 @@ void HSVtoRGB(float& fR, float& fG, float& fB, float& fH, float& fS, float& fV) 
   fB += fM;
 }
 
-void saveOutputMask(cv::Mat mask, cv::Size imageSize, float flow_threshold, int min_size){
+void saveOutputMask(cv::Mat mask, cv::Size imageSize, std::string path){
   double minVal;
   double maxVal;
   cv::Point minLoc;
@@ -311,8 +311,47 @@ void saveOutputMask(cv::Mat mask, cv::Size imageSize, float flow_threshold, int 
     outputMask.setTo(cv::Scalar(fR * 255, fG * 255, fB * 255), mask == (i + 1));
   }
   cv::resize(outputMask, outputMask, imageSize);
-  std::stringstream ss;
-  ss << std::fixed << std::setprecision(2) << flow_threshold;  
-  std::string fileName = "outputMask" + ss.str() + "_" + std::to_string(min_size);
-  cv::imwrite(fileName + ".png", outputMask);
+  cv::imwrite(path, outputMask);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
