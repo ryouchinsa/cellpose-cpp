@@ -30,9 +30,7 @@ class Cyto3ONNX(nn.Module):
 
     def forward(self, img, img_size, channels, diameter, cellprob_threshold, niter):
         print("--- forward", img.shape, img_size, channels, diameter, cellprob_threshold, niter)
-        img = torch.permute(img, (0, 2, 3, 1))
-        print(img.shape)
-        img = img[:, :, :, channels]
+        img = set_img_channels(img, channels)
         print(img.shape)
         img = img.squeeze()
         img = torch.permute(img, (2, 0, 1))
@@ -128,7 +126,7 @@ class Cyto3ONNX(nn.Module):
         print(IMG.shape)
         ysub = torch.zeros((ystart.shape[0] * xstart.shape[0], 2), dtype=torch.long, device=self.device)
         xsub = torch.zeros((ystart.shape[0] * xstart.shape[0], 2), dtype=torch.long, device=self.device)
-        IMG= set_imgb_to_IMG(imgb, ystart, xstart, lyx, ysub, xsub, IMG)
+        IMG = set_imgb_to_IMG(imgb, ystart, xstart, lyx, ysub, xsub, IMG)
         print(ysub)
         print(xsub)
 
@@ -339,6 +337,16 @@ def masks_to_flows(masks, device):
     mu0 = torch.zeros((2, Ly0, Lx0), dtype=torch.float32, device=device)
     mu0[:, yx[0] - 1, yx[1] - 1] = mu
     return mu0
+
+@torch.jit.script
+def set_img_channels(img, channels):
+    img = torch.permute(img, (0, 2, 3, 1))
+    print(img.shape)
+    img = img[:, :, :, channels]
+    if channels[0] == channels[1]:
+        img[:, :, :, 1] = 0
+    print(img.shape)
+    return img
 
 def normalize99(img, percentiles):
     input = torch.flatten(img)
@@ -571,6 +579,16 @@ def show(image_path, device):
     print(f"post_process time: {(time.perf_counter() - start) * 1000:.2f} ms")
     show_mask(img_original, img_size, mask, rgb_of_flows)
 
+def show2(image_path, device):
+    start = time.perf_counter()
+    img = imread(image_path)
+    img_original = img
+    img_resized, img_size, channels, diameter, cellprob_threshold, niter = get_inputs(img, device=device)
+
+    model = models.Cellpose(device=device)
+    masks_pred, flows, styles, diams = model.eval(img_resized, diameter=30, channels=[0,0], niter=200)
+    print(masks_pred.shape)
+
 def export_onnx(image_path, device):
     model = Cyto3ONNX(device=device)
     img = imread(image_path)
@@ -678,9 +696,9 @@ def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     print(img.shape)
     img_size = torch.tensor([img.shape[2], img.shape[3]], dtype=torch.long)
     print(img_size)
-    channels = torch.tensor([1, 0], dtype=torch.long)
+    channels = torch.tensor([0, 0], dtype=torch.long)
     print("channels", channels)
-    diameter = torch.tensor([40], dtype=torch.long)
+    diameter = torch.tensor([30], dtype=torch.long)
     print("diameter", diameter)
     cellprob_threshold = torch.tensor([0.0], dtype=torch.float32)
     print("cellprob_threshold", cellprob_threshold)
@@ -801,6 +819,8 @@ if __name__ == "__main__":
     device = torch.device(args.device)
     if args.mode == "show":
         show(args.image, device)
+    elif args.mode == "show2":
+        show2(args.image, device)
     elif args.mode == "export":
         export_onnx(args.image, device)
     elif args.mode == "import":

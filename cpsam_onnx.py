@@ -51,11 +51,7 @@ class CPSAMONNX(nn.Module):
 
     def forward(self, img, img_size, channels, diameter, cellprob_threshold, niter):
         print("--- forward", img.shape, img_size, channels, diameter, cellprob_threshold, niter)
-        img = torch.permute(img, (0, 2, 3, 1))
-        print(img.shape)
-        img_selected_channels = torch.zeros_like(img)
-        img_selected_channels[:, :, :, :channels.shape[0]] = img[:, :, :, channels]
-        img = img_selected_channels.clone()
+        img = set_img_channels(img, channels)
         print(img.shape)
         img = img.squeeze()
         img = torch.permute(img, (2, 0, 1))
@@ -362,6 +358,18 @@ def masks_to_flows(masks, device):
     mu0 = torch.zeros((2, Ly0, Lx0), dtype=torch.float32, device=device)
     mu0[:, yx[0] - 1, yx[1] - 1] = mu
     return mu0
+
+@torch.jit.script
+def set_img_channels(img, channels):
+    img = torch.permute(img, (0, 2, 3, 1))
+    print(img.shape)
+    img_selected_channels = torch.zeros_like(img)
+    img_selected_channels[:, :, :, :channels.shape[0]] = img[:, :, :, channels]
+    if channels[0] == channels[1]:
+        img_selected_channels[:, :, :, 1] = 0
+    img = img_selected_channels.clone()
+    print(img.shape)
+    return img
 
 def normalize99(img, percentiles):
     input = torch.flatten(img)
@@ -701,9 +709,9 @@ def get_inputs(img, niter_default=200, device=torch.device("cpu")):
     print(img.shape)
     img_size = torch.tensor([img.shape[2], img.shape[3]], dtype=torch.long)
     print(img_size)
-    channels = torch.tensor([1, 0], dtype=torch.long)
+    channels = torch.tensor([0, 0], dtype=torch.long)
     print("channels", channels)
-    diameter = torch.tensor([40], dtype=torch.long)
+    diameter = torch.tensor([30], dtype=torch.long)
     print("diameter", diameter)
     cellprob_threshold = torch.tensor([0.0], dtype=torch.float32)
     print("cellprob_threshold", cellprob_threshold)

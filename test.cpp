@@ -11,7 +11,6 @@ DEFINE_string(device, "cpu", "cpu or cuda:0(1,2,3...)");
 DEFINE_int32(channel0, 0, "0, 1, 2");
 DEFINE_int32(channel1, 0, "0, 1, 2");
 DEFINE_int32(diameter, 30, "20, 30, 40");
-DEFINE_bool(gray, false, "Convert to grayscale");
 DEFINE_bool(h, false, "Show help");
 
 int main(int argc, char** argv) {
@@ -34,12 +33,7 @@ int main(int argc, char** argv) {
   begin = std::chrono::steady_clock::now();
   std::cout<<"preprocessImage started"<<std::endl;
   cv::Mat image = cv::imread(FLAGS_image, cv::IMREAD_COLOR);
-  if(FLAGS_gray){
-    cv::cvtColor(image, image, cv::COLOR_BGR2GRAY);
-    cv::cvtColor(image, image, cv::COLOR_GRAY2RGB);
-  }else{
-    cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
-  }
+  cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
   cv::Size imageSize = cv::Size(image.cols, image.rows);
   cv::Size inputSize = cyto3.getInputSize();
   cv::resize(image, image, inputSize);
